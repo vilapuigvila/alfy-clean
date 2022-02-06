@@ -23,3 +23,14 @@ func shell(_ command: String) -> String {
   
   return output
 }
+
+func keyboardInput(
+    file: String = #file,
+    line: String = #file
+) throws -> String {
+    let keyboard = FileHandle.standardInput
+    guard let input = String(data: keyboard.availableData, encoding: .utf8) else {
+        throw "Unknwon error.... \(file) - \(line)"
+    }
+    return input
+}

@@ -1,4 +1,9 @@
-//print("Hello, world!")
+//
+//  main.swift
+//
+//
+//  Created by albert vila puigvila on 1/2/22.
+//
 
 import Foundation
 import ArgumentParser
@@ -137,35 +142,91 @@ Delete shit data of your developer Folder like:
 """
         )
         private var isDone: Bool = false
+        private var option: Int = 0 {
+            didSet {
+                if !(1...6).contains(option) {
+                    fatalError("🤔 Value `\(option)` is not allowed")
+                }
+            }
+        }
         
         @Option(name: .shortAndLong, help: "Select folder to delete his data!")
-        private var delete: Int
+        private var delete: Int?
         
         @Flag(name: .shortAndLong, help: "Show extra logging for debugging purposes.")
         private var verbose: Bool = false
         
         mutating func run() throws {
-            Print.h3(
-"""
-Select one input to clean folder:
-1 - Derived Data
-2 - Archives
-3 - Simulators
-4 - Previews
-5 - Simulators caches
-6 - Devices
-""")
+            Print.h3(options)
+            
+            if let shortOption = delete {
+                option = shortOption
+            } else {
+                let name = try keyboardInput()
+                option = (name as NSString).integerValue
+            }
+//            let ttt = TimerWrapper()
+            
+            func shellCommand() throws -> String {
+                switch option {
+                case 1: return "rm -rf ~/Library/Developer/Xcode/DerivedData"
+                case 2: return "rm -rf ~/Library/Developer/Xcode/Archives"
+                default: throw "NOT ALLOWED AT THIS MOMENT 🔥"
+                }
+            }
+            Print.withColor(.cyan, "Wait... 🙏")
+            let command = try shellCommand()
+            shell(command)
+            Print.withColor(.green, "job done! 🍻")
+            isDone = true
+            
             while(!isDone) {
                 RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
             }
-            switch delete {
-            case 1:
-                shell("rm -rf ~/Library/Developer/Xcode/DerivedData")
-                isDone = true
-            default: break
-            }
-            
         }
+        private var options: String {
+"""
+Enter input to clean desired folder:
+1 -> Derived Data
+2 -> Archives
+3 -> Simulators
+4 -> Previews
+5 -> Simulators caches
+6 -> Devices
+"""
+        }
+    }
+}
+
+fileprivate class TimerWrapper: NSObject {
+    private var runCount: Int = 0
+    private var timer: Timer?
+    
+    func fireTimer() throws {
+        if #available(macOS 10.12, *) {
+            timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                self.runCount = self.runCount == 4 ? 0 : self.runCount
+                var text: String {
+                    switch self.runCount {
+                    case 0: return "Wait."
+                    case 1: return "Wait.."
+                    case 2: return "Wait..."
+                    case 3: return "🙏 🙏 🙏"
+                    default: fatalError("glups..") }
+                }
+                Print.keepingLine(text, .magenta)
+                self.runCount += 1
+            }
+            RunLoop.current.run(mode: .default, before: .distantFuture)
+        } else {
+            throw "check macOS version"
+        }
+    }
+    func stopTimer() {
+        fflush(__stdoutp)
+        timer?.invalidate()
+        timer = nil
     }
 }
 

@@ -31,4 +31,10 @@ struct Print {
         print("\(output)")
       }
     }
+    static func withColor(_ color: Color, _ output: String) {
+        print("\(color.rawValue)\(output)\(Color.reset.rawValue)")
+    }
+    static func keepingLine(_ output: String, _ color: Color) {
+        print("\(color.rawValue)\u{1B}[1A\u{1B}[K\(output)")
+    }
 }
