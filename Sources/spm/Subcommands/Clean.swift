@@ -79,19 +79,20 @@ folders list:
             }
         }
         
-        private func romaxin() {
+        private func romaxin() throws {
             let fileManager = FileManager.default
             
-            if #available(macOS 10.12, *) {
-                do {
-                    let documentsDirectory =  try fileManager.url(for: .libraryDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                    let url = documentsDirectory.appendingPathComponent("Developer/CoreSimulator/Devices", isDirectory: true)
-                    url.subDirectories().forEach {
-                        shell("xcrun simctl erase \($0.lastPathComponent)")
-                    }
-               } catch {
-                   fatalError()
-               }
+            guard #available(macOS 10.12, *) else {
+                throw "Your macOS version must be 10.12 or higher"
+            }
+            do {
+                let documentsDirectory =  try fileManager.url(for: .libraryDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                let url = documentsDirectory.appendingPathComponent("Developer/CoreSimulator/Devices", isDirectory: true)
+                url.subDirectories().forEach {
+                    shell("xcrun simctl erase \($0.lastPathComponent)")
+                }
+            } catch {
+                fatalError()
             }
         }
         
