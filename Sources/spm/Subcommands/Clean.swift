@@ -19,16 +19,31 @@ struct Clean: ParsableCommand {
 
 extension Clean {
     struct Delete: ParsableCommand {
+        enum OptionInput: Int {
+            case derivedData, simultorsData, archives, simulatorsCache
+            init(value: Int) throws {
+                switch value {
+                case 0: self = .derivedData
+                case 1: self = .simultorsData
+                case 2: self = .archives
+                case 3: self = .simulatorsCache
+                default: throw "Manage this case \(value)"
+                }
+            }
+            func shellCommand() throws -> String {
+                switch self {
+                case .derivedData: return "rm -rf ~/Library/Developer/Xcode/DerivedData"
+                case .archives: return "rm -rf ~/Library/Developer/Xcode/Archives"
+                case .simulatorsCache: return "rm -rf ~/Library/Developer/CoreSimulator/Caches/dyld"
+                case .simultorsData: fatalError("Doesn't have a shell command")
+                }
+            }
+        }
         static var foldersName: String {
             return Cache.CacheFolder.allCases.map { $0.rawValue }.joined(separator: " or ")
         }
         public static let configuration = CommandConfiguration(
-            abstract:
-"""
-Delete shit data of your developer folder,
-folders list:
-\(foldersName) 🥳
-"""
+            abstract: configMessage
         )
         private var isDone: Bool = false
         private var option: Int = 0 {
@@ -46,18 +61,17 @@ folders list:
         private var verbose: Bool = false
         
         mutating func run() throws {
-            Print.h3(options)
+            Print.h3(optionsMessage)
+//                deleteSimulatorsData()
+            let optionInput = try pickOption()
             
-            if let shortOption = delete {
-                romaxin()
-                shell("xcrun simctl delete unavailable")
-//                Print.withColor(.green, "run: `sudo killall -9 com.apple.CoreSimulator.CoreSimulatorService`")
-//                option = shortOption
-            } else {
-                let name = try keyboardInput()
-                option = (name as NSString).integerValue
+            switch optionInput {
+            case .derivedData:
+                break
+            case .simultorsData: break
+            case .archives: break
+            case .simulatorsCache: break
             }
-//            let ttt = TimerWrapper()
             
             func shellCommand() throws -> String {
                 switch option {
@@ -79,15 +93,35 @@ folders list:
             }
         }
         
-        private func romaxin() throws {
+        private mutating func pickOption() throws -> OptionInput {
+            if let shortOption = delete {
+                option = shortOption
+            } else {
+                let name = try keyboardInput()
+                option = (name as NSString).integerValue
+            }
+            guard let optionInput = try? OptionInput(value: option) else {
+                throw "error"
+            }
+            return optionInput
+        }
+        
+        private func deleteSimulatorsData() throws {
             let fileManager = FileManager.default
-            
             guard #available(macOS 10.12, *) else {
                 throw "Your macOS version must be 10.12 or higher"
             }
             do {
-                let documentsDirectory =  try fileManager.url(for: .libraryDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                let url = documentsDirectory.appendingPathComponent("Developer/CoreSimulator/Devices", isDirectory: true)
+                let documentsDirectory =  try fileManager.url(
+                    for: .libraryDirectory,
+                       in: .userDomainMask,
+                       appropriateFor: nil,
+                       create: true
+                )
+                let url = documentsDirectory.appendingPathComponent(
+                    "Developer/CoreSimulator/Devices",
+                    isDirectory: true
+                )
                 url.subDirectories().forEach {
                     shell("xcrun simctl erase \($0.lastPathComponent)")
                 }
@@ -96,36 +130,26 @@ folders list:
             }
         }
         
-        private var options: String {
+        private var optionsMessage: String {
 """
-Enter input to clean desired folder:
-1 -> Derived Data
-2 -> Archives
-3 -> Simulators
-4 -> Previews
-5 -> Simulators caches
-6 -> Devices
+            Enter input to clean desired folder:
+            1 -> Derived Data
+            2 -> Archives
+            3 -> Simulators
+            4 -> Previews
+            5 -> Simulators caches
+            6 -> Devices
+"""
+        }
+        
+        private static var configMessage: String {
+"""
+            Delete shit data of your developer folder,
+            folders list:
+            \(foldersName) 🥳
 """
         }
     }
 }
 
-extension URL {
-    func subDirectories() -> [URL] {
-        if #available(macOS 10.11, *) {
-            guard hasDirectoryPath else { return [] }
-        } else {
-            fatalError()
-            return []
-        }
-        if #available(macOS 10.11, *) {
-            guard let items = try? FileManager.default.contentsOfDirectory(at: self, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]).filter(\.hasDirectoryPath) else {
-                return []
-            }
-            return items
-        } else {
-            fatalError()
-            return []
-        }
-    }
-}
+//                Print.withColor(.green, "run: `sudo killall -9 com.apple.CoreSimulator.CoreSimulatorService`")
