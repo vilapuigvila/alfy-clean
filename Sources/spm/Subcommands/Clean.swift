@@ -19,14 +19,16 @@ struct Clean: ParsableCommand {
 
 extension Clean {
     struct Delete: ParsableCommand {
-        enum OptionInput: Int {
-            case derivedData, simultorsData, archives, simulatorsCache
+        enum OptionInput: Int, CaseIterable {
+            case derivedData, archives, simultorsData, simulatorsCache
+            init?(rawValue: Int) { fatalError("use `init(value: Int) throws`") }
+            
             init(value: Int) throws {
                 switch value {
-                case 0: self = .derivedData
-                case 1: self = .simultorsData
+                case 1: self = .derivedData
                 case 2: self = .archives
-                case 3: self = .simulatorsCache
+                case 3: self = .simultorsData
+                case 4: self = .simulatorsCache
                 default: throw "Manage this case \(value)"
                 }
             }
@@ -35,7 +37,7 @@ extension Clean {
                 case .derivedData: return "rm -rf ~/Library/Developer/Xcode/DerivedData"
                 case .archives: return "rm -rf ~/Library/Developer/Xcode/Archives"
                 case .simulatorsCache: return "rm -rf ~/Library/Developer/CoreSimulator/Caches/dyld"
-                case .simultorsData: fatalError("Doesn't have a shell command")
+                case .simultorsData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
                 }
             }
         }
@@ -48,7 +50,7 @@ extension Clean {
         private var isDone: Bool = false
         private var option: Int = 0 {
             didSet {
-                if !(1...6).contains(option) {
+                if !(1...OptionInput.allCases.count).contains(option) {
                     fatalError("🤔 Value `\(option)` is not allowed")
                 }
             }
@@ -60,38 +62,28 @@ extension Clean {
         @Flag(name: .shortAndLong, help: "Show extra logging for debugging purposes.")
         private var verbose: Bool = false
         
+        // MARK: Main run -
         mutating func run() throws {
             Print.h3(optionsMessage)
-//                deleteSimulatorsData()
             let optionInput = try pickOption()
             
-            switch optionInput {
-            case .derivedData:
-                break
-            case .simultorsData: break
-            case .archives: break
-            case .simulatorsCache: break
-            }
-            
-            func shellCommand() throws -> String {
-                switch option {
-                case 1: return "rm -rf ~/Library/Developer/Xcode/DerivedData"
-                case 2: return "for i in {1..5}; do; echo 'Welcome $i times'; done"
-                case 3: return "rm -rf ~/Library/Developer/Xcode/Archives"
-                case 5: return "rm -rf ~/Library/Developer/CoreSimulator/Caches/dyld"
-                default: throw "NOT ALLOWED AT THIS MOMENT 🔥"
-                }
-            }
             Print.withColor(.cyan, "Wait... 🙏")
-//            let command = try shellCommand()
-//            shell(command)
-            Print.withColor(.green, "job done! 🍻")
+            switch optionInput {
+            case .simultorsData:
+                try deleteSimulatorsData()
+            case .derivedData, .archives, .simulatorsCache:
+                let command = try optionInput.shellCommand()
+                shell(command)
+            }
             isDone = true
+            Print.withColor(.green, "job done! 🍻")
             
             while(!isDone) {
                 RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
             }
         }
+        
+        // MARK: helpers -
         
         private mutating func pickOption() throws -> OptionInput {
             if let shortOption = delete {
@@ -100,10 +92,7 @@ extension Clean {
                 let name = try keyboardInput()
                 option = (name as NSString).integerValue
             }
-            guard let optionInput = try? OptionInput(value: option) else {
-                throw "error"
-            }
-            return optionInput
+            return try OptionInput(value: option)
         }
         
         private func deleteSimulatorsData() throws {
@@ -122,11 +111,12 @@ extension Clean {
                     "Developer/CoreSimulator/Devices",
                     isDirectory: true
                 )
-                url.subDirectories().forEach {
+                let subDirectories = try url.subDirectories()
+                subDirectories.forEach {
                     shell("xcrun simctl erase \($0.lastPathComponent)")
                 }
             } catch {
-                fatalError()
+                throw "Can't delete simulators data \(#function)"
             }
         }
         
@@ -136,8 +126,8 @@ extension Clean {
             1 -> Derived Data
             2 -> Archives
             3 -> Simulators
-            4 -> Previews
-            5 -> Simulators caches
+            4 -> Simulators caches
+            5 -> Previews
             6 -> Devices
 """
         }

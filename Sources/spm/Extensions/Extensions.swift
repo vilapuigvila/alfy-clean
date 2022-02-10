@@ -10,21 +10,26 @@ import Foundation
 extension String: Error { }
 
 extension URL {
-    func subDirectories() -> [URL] {
+    func subDirectories() throws -> [URL] {
         if #available(macOS 10.11, *) {
-            guard hasDirectoryPath else { return [] }
+            guard hasDirectoryPath else {
+//                return []
+                throw "macOS not available  \(#function)"
+            }
         } else {
-            fatalError()
-            return []
+//            return []
+            throw "macOS not available  \(#function)"
         }
         if #available(macOS 10.11, *) {
             guard let items = try? FileManager.default.contentsOfDirectory(at: self, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]).filter(\.hasDirectoryPath) else {
-                return []
+//                return []
+                throw "macOS not available  \(#function)"
             }
             return items
         } else {
-            fatalError()
-            return []
+//            return []
+            throw "macOS not available  \(#function)"
         }
     }
+//    throw "macOS not available  \(#function)"
 }
