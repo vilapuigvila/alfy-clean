@@ -9,7 +9,7 @@ import Foundation
 
 class AVPTimer: NSObject {
     private var runCount: Int = 0
-    private var timer: Timer?
+    private(set) var timer: Timer?
     
     func fireTimer() throws {
         if #available(macOS 10.12, *) {
@@ -27,7 +27,10 @@ class AVPTimer: NSObject {
                 Print.keepingLine(text, .magenta)
                 self.runCount += 1
             }
-            RunLoop.current.run(mode: .default, before: .distantFuture)
+            guard let tim = timer else {
+                throw "Error timer doesn't exist"
+            }
+            RunLoop.current.add(tim, forMode: RunLoop.Mode("com.rderik.myevents"))
         } else {
             throw "check macOS version"
         }

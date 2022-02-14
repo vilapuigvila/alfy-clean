@@ -24,17 +24,6 @@ struct Avp: ParsableCommand {
   )
 }
 
-//extension Avp {
-//    enum CacheFolder: String, ExpressibleByArgument, CaseIterable {
-//        case all
-//        case archives
-//        case simulators
-//        case deviceSupport
-//        case derivedData
-//        case previews
-//        case coreSimulatorCaches
-//  }
-//}
-
+// MARK: Run Main program -
 
 Avp.main()
