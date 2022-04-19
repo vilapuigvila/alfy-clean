@@ -35,8 +35,7 @@ struct Clean: ParsableCommand {
     // MARK: Main run -
     
     mutating func run() throws {
-        let next = try deleteAll()
-        guard next else {
+        guard try deleteAll() else {
             isDone = true
             return
         }
@@ -68,17 +67,15 @@ struct Clean: ParsableCommand {
         guard all == "all" else {
             throw "Maybe you want to write `all` ?"
         }
+        Print.withColor(.yellow, "deleting Simulators data...")
         try deleteSimulatorsData()
-        Print.withColor(.green, "Simulators data deleted...")
-        
+
         try (2...5).forEach {
             do {
                 let option = try OptionInput(value: $0).shellCommand()
-                Print.withColor(.white, "\(option)")
+                Print.withColor(.yellow, "deleting \(option)...")
                 shell(option)
-                Print.withColor(.green, "Done...")
             } catch {
-                Print.withColor(.magenta, "avp error \(error.localizedDescription)")
                 throw error.localizedDescription
             }
         }
