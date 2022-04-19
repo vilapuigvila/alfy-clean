@@ -23,9 +23,8 @@ struct Clean: ParsableCommand {
     }
     
     // MARK: property wrappers -
-    
-//        @Argument(help: "The title of the blog post")
-//        private var title: String
+    @Argument(help: "`all` string will delete all cases")
+    private var all: String?
     
     @Option(name: .shortAndLong, help: "Select directory to delete his data!")
     private var delete: Int?
@@ -33,10 +32,15 @@ struct Clean: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Show extra logging for debugging purposes.")
     private var verbose: Bool = false
     
-    
     // MARK: Main run -
     
     mutating func run() throws {
+        let next = try deleteAll()
+        guard next else {
+            isDone = true
+            return
+        }
+        
         let optionInput = try pickOption()
         Print.withColor(.cyan, "Wait... 🙏")
         
@@ -57,6 +61,30 @@ struct Clean: ParsableCommand {
     
     // MARK: helpers -
     
+    private func deleteAll() throws -> Bool {
+        guard let all = all else {
+            return true
+        }
+        guard all == "all" else {
+            throw "Maybe you want to write `all` ?"
+        }
+        try deleteSimulatorsData()
+        Print.withColor(.green, "Simulators data deleted...")
+        
+        try (2...5).forEach {
+            do {
+                let option = try OptionInput(value: $0).shellCommand()
+                Print.withColor(.white, "\(option)")
+                shell(option)
+                Print.withColor(.green, "Done...")
+            } catch {
+                Print.withColor(.magenta, "avp error \(error.localizedDescription)")
+                throw error.localizedDescription
+            }
+        }
+        return false
+    }
+    
     private mutating func pickOption() throws -> OptionInput {
         if let shortOption = delete {
             option = shortOption
@@ -76,9 +104,9 @@ struct Clean: ParsableCommand {
         do {
             let documentsDirectory =  try fileManager.url(
                 for: .libraryDirectory,
-                   in: .userDomainMask,
-                   appropriateFor: nil,
-                   create: true
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
             )
             let url = documentsDirectory.appendingPathComponent(
                 "Developer/CoreSimulator/Devices",
@@ -87,6 +115,7 @@ struct Clean: ParsableCommand {
             let subDirectories = try url.subDirectories()
             subDirectories.forEach {
                 shell("xcrun simctl erase \($0.lastPathComponent)")
+                shell("rm '~/Library/Developer/CoreSimulator/Devices\($0.lastPathComponent)'/data/Documents")
             }
         } catch {
             throw "Can't delete simulators data \(#function)"
