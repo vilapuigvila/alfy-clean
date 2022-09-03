@@ -79,11 +79,11 @@ extension Cache.CacheFolder {
         case .simulators:
             return ["~/Library/Developer/CoreSimulator/Devices"]
         case .deviceSupport:
-            return ["~/Library/Developer/Xcode"]
+            return ["~/Library/Developer/Xcode/iOS\' 'DeviceSupport"]
         case .derivedData:
             return ["~/Library/Developer/Xcode/DerivedData"]
         case .previews:
-            return ["~/Library/Developer/Xcode/UserData/Previews/Simulator Devices"]
+            return ["~/Library/Developer/Xcode/UserData/Previews"]
         case .coreSimulatorCaches:
             return ["~/Library/Developer/CoreSimulator/Caches/dyld"]
         case .all:

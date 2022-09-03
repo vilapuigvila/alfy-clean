@@ -35,7 +35,7 @@ struct Clean: ParsableCommand {
     // MARK: Main run -
     
     mutating func run() throws {
-        guard try deleteAll() else {
+         guard try deleteAll() else {
             isDone = true
             return
         }
@@ -144,7 +144,7 @@ extension Clean {
             case .derivedData: return "rm -rf ~/Library/Developer/Xcode/DerivedData"
             case .archives: return "rm -rf ~/Library/Developer/Xcode/Archives"
             case .simulatorsCache: return "rm -rf ~/Library/Developer/CoreSimulator/Caches/dyld"
-            case .previews: return "~/Library/Developer/Xcode/UserData/Previews/Simulator Devices"
+            case .previews: return "rm -rf ~/Library/Developer/Xcode/UserData/Previews"
             case .simultorsData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             }
         }
