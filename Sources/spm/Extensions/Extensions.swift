@@ -13,21 +13,24 @@ extension URL {
     func subDirectories() throws -> [URL] {
         if #available(macOS 10.11, *) {
             guard hasDirectoryPath else {
-//                return []
                 throw "macOS not available  \(#function)"
             }
         } else {
-//            return []
             throw "macOS not available  \(#function)"
         }
         if #available(macOS 10.11, *) {
-            guard let items = try? FileManager.default.contentsOfDirectory(at: self, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]).filter(\.hasDirectoryPath) else {
-//                return []
+            guard let items = try? FileManager
+                .default
+                .contentsOfDirectory(
+                    at: self,
+                    includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles]
+                ).filter(\.hasDirectoryPath)
+            else {
                 throw "macOS not available  \(#function)"
             }
             return items
         } else {
-//            return []
             throw "macOS not available  \(#function)"
         }
     }
