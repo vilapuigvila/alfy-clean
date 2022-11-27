@@ -62,22 +62,28 @@ extension Cache {
 extension Cache {
     enum CacheFolder: String, ExpressibleByArgument, CaseIterable {
         case all
+        case developer
         case archives
         case simulators
         case deviceSupport
         case derivedData
         case previews
         case coreSimulatorCaches
+        case testSimulatorsDevices
     }
 }
 
 extension Cache.CacheFolder {
     var paths: [String] {
         switch self {
+        case .developer:
+            return ["~/Library/Developer"]
         case .archives:
             return ["~/Library/Developer/Xcode/Archives"]
         case .simulators:
             return ["~/Library/Developer/CoreSimulator/Devices"]
+        case .testSimulatorsDevices:
+            return ["~/Library/Developer/XCTestDevices"]
         case .deviceSupport:
             return ["~/Library/Developer/Xcode/iOS\' 'DeviceSupport"]
         case .derivedData:
