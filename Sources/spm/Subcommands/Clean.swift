@@ -16,7 +16,7 @@ struct Clean: ParsableCommand {
     private var isDone: Bool = false
     private var option: Int = 0 {
         didSet {
-            if !(1...OptionInput.allCases.count).contains(option) {
+            if !(0...OptionInput.allCases.count).contains(option) {
                 fatalError("🤔 Value `\(option)` is not allowed")
             }
         }
@@ -25,6 +25,9 @@ struct Clean: ParsableCommand {
     // MARK: property wrappers -
     @Argument(help: "`all` string will delete all cases")
     private var all: String?
+    
+    @Argument(help: "`ndd` string will delete all cases")
+    private var noDerivedData: String?
     
     @Option(name: .shortAndLong, help: "Select directory to delete his data!")
     private var delete: Int?
@@ -35,7 +38,6 @@ struct Clean: ParsableCommand {
     // MARK: Main run -
     
     mutating func run() throws {
-//        shell("xcrun simctl delete unavailable")
         guard try deleteAll() else {
             isDone = true
             return
@@ -45,6 +47,8 @@ struct Clean: ParsableCommand {
         Print.withColor(.cyan, "Wait... 🙏")
         
         switch optionInput {
+        case .noDerivedData:
+            try deleteAllUnlessDerivedData()
         case .simultorsData:
             try deleteSimulatorsData()
         case .clonedSimulatorsData:
@@ -70,7 +74,7 @@ struct Clean: ParsableCommand {
         guard all == "all" else {
             throw "Maybe you want to write `all` ?"
         }
-        Print.withColor(.yellow, "deleting Simulators data...")
+        Print.withColor(.yellow, "all data...")
         try deleteSimulatorsData()
         try deleteClonedSimulatorsDataAndUserDefaults()
 
@@ -84,6 +88,23 @@ struct Clean: ParsableCommand {
             }
         }
         return false
+    }
+    
+    private func deleteAllUnlessDerivedData() throws {
+        Print.withColor(.yellow, "deleting simulators data")
+        try deleteSimulatorsData()
+        Print.withColor(.yellow, "deleting cloned simulators data")
+        try deleteClonedSimulatorsDataAndUserDefaults()
+
+        try (4...5).forEach {
+            do {
+                let option = try OptionInput(value: $0).shellCommand()
+                Print.withColor(.yellow, "deleting \(option)...")
+                shell(option)
+            } catch {
+                throw error.localizedDescription
+            }
+        }
     }
     
     private mutating func pickOption() throws -> OptionInput {
@@ -170,10 +191,11 @@ struct Clean: ParsableCommand {
 extension Clean {
     
     enum OptionInput: Int, CaseIterable {
-        case simultorsData, clonedSimulatorsData, derivedData, archives, simulatorsCache, previews
+        case noDerivedData, simultorsData, clonedSimulatorsData, derivedData, archives, simulatorsCache, previews
         // XCPGDevices && Xcode/iOS DeviceSupport
         init(value: Int) throws {
             switch value {
+            case 0: self = .noDerivedData
             case 1: self = .simultorsData
             case 2: self = .clonedSimulatorsData
             case 3: self = .derivedData
@@ -187,6 +209,7 @@ extension Clean {
         
         func shellCommand() throws -> String {
             switch self {
+            case .noDerivedData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .simultorsData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .clonedSimulatorsData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .derivedData: return "rm -rf ~/Library/Developer/Xcode/DerivedData"
@@ -204,6 +227,7 @@ private extension Clean {
     var optionsMessage: String {
 """
 Enter input `number` to clean desired folder:
+0 -> 🥳 All, but not derived data
 1 -> Simulators Data
 2 -> Cloned simulators Data & UserDefaults
 3 -> Derived Data
