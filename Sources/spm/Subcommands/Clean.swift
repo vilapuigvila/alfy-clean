@@ -53,7 +53,7 @@ struct Clean: ParsableCommand {
             try deleteSimulatorsData()
         case .clonedSimulatorsData:
             try deleteClonedSimulatorsDataAndUserDefaults()
-        case .derivedData, .archives, .simulatorsCache, .previews:
+        case .derivedData, .archives, .previews:
             let command = try optionInput.shellCommand()
             shell(command)
         }
@@ -91,11 +91,13 @@ struct Clean: ParsableCommand {
     }
     
     private func deleteAllUnlessDerivedData() throws {
+        Print.withColor(.yellow, "deleting macOS DeviceSupport")
+        shell("rm -R ~/Library/Developer/Xcode/macOS' 'DeviceSupport")
         Print.withColor(.yellow, "deleting simulators data")
         try deleteSimulatorsData()
         Print.withColor(.yellow, "deleting cloned simulators data")
         try deleteClonedSimulatorsDataAndUserDefaults()
-
+        
         try (4...5).forEach {
             do {
                 let option = try OptionInput(value: $0).shellCommand()
@@ -130,10 +132,14 @@ struct Clean: ParsableCommand {
                 appropriateFor: nil,
                 create: true
             )
+            Print.withColor(.yellow, "deleting `Caches` simulators data")
+            shell("rm -R ~/Library/Developer/CoreSimulator/Caches")
+            
             let url = documentsDirectory.appendingPathComponent(
                 "Developer/CoreSimulator/Devices",
                 isDirectory: true
             )
+            
             let subDirectories = try url.subDirectories()
             subDirectories.forEach {
                 shell("xcrun simctl erase \($0.lastPathComponent)")
@@ -191,7 +197,7 @@ struct Clean: ParsableCommand {
 extension Clean {
     
     enum OptionInput: Int, CaseIterable {
-        case noDerivedData, simultorsData, clonedSimulatorsData, derivedData, archives, simulatorsCache, previews
+        case noDerivedData, simultorsData, clonedSimulatorsData, derivedData, archives, previews
         // XCPGDevices && Xcode/iOS DeviceSupport
         init(value: Int) throws {
             switch value {
@@ -200,8 +206,7 @@ extension Clean {
             case 2: self = .clonedSimulatorsData
             case 3: self = .derivedData
             case 4: self = .archives
-            case 5: self = .simulatorsCache
-            case 6: self = .previews
+            case 5: self = .previews
             default: throw "Manage this case \(value)"
             }
         }
@@ -214,7 +219,6 @@ extension Clean {
             case .clonedSimulatorsData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .derivedData: return "rm -rf ~/Library/Developer/Xcode/DerivedData"
             case .archives: return "rm -rf ~/Library/Developer/Xcode/Archives"
-            case .simulatorsCache: return "rm -rf ~/Library/Developer/CoreSimulator/Caches/dyld"
             case .previews: return "rm -rf ~/Library/Developer/Xcode/UserData/Previews"
             }
         }
@@ -232,8 +236,7 @@ Enter input `number` to clean desired folder:
 2 -> Cloned simulators Data & UserDefaults
 3 -> Derived Data
 4 -> Archives
-5 -> Simulators Caches
-6 -> Previews
+5 -> Previews
 """
     }
     
