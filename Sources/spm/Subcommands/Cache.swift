@@ -40,7 +40,6 @@ extension Cache {
                 allCases.remove(at: allCases.firstIndex(of: .all)!)
                 handleList(allCases)
             } else {
-//                Print.withColor(.red, cacheFolder)
                 handleList([cacheFolder])
             }
         }

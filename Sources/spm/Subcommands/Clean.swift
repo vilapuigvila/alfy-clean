@@ -93,7 +93,7 @@ struct Clean: ParsableCommand {
     private func deleteAllUnlessDerivedData() throws {
         Print.withColor(.yellow, "deleting macOS DeviceSupport")
         shell("rm -R ~/Library/Developer/Xcode/macOS' 'DeviceSupport")
-        Print.withColor(.yellow, "deleting simulators data")
+        Print.withColor(.yellow, "deleting simulators data & keychain")
         try deleteSimulatorsData()
         Print.withColor(.yellow, "deleting cloned simulators data")
         try deleteClonedSimulatorsDataAndUserDefaults()
@@ -143,7 +143,9 @@ struct Clean: ParsableCommand {
             let subDirectories = try url.subDirectories()
             subDirectories.forEach {
                 shell("xcrun simctl erase \($0.lastPathComponent)")
-                shell("rm ~/Library/Developer/CoreSimulator/Devices/\($0.lastPathComponent)/data/Documents")
+                shell("rm ~/Library/Developer/CoreSimulator/Devices/\($0.lastPathComponent)/data/Documents")                
+                shell("rm -R ~/Library/Developer/CoreSimulator/Devices/\($0.lastPathComponent)/data/Library/Keychains")
+
             }
         } catch {
             throw "Can't delete simulators data \(#function)"
@@ -185,6 +187,7 @@ struct Clean: ParsableCommand {
                 shell("rm -R ~/Library/Developer/XCPGDevices/\($0.lastPathComponent)/data/Documents")
                 shell("rm -R ~/Library/Developer/XCPGDevices/\($0.lastPathComponent)/data/Library/Preferences")
                 shell("rm -R ~/Library/Developer/XCPGDevices/\($0.lastPathComponent)/data/Library/Caches")
+                shell("rm -R ~/Library/Developer/XCPGDevices/\($0.lastPathComponent)/data/Library/Keychains")
             }
         } catch {
             throw "Can't delete cloned simulators data \(#function)"
@@ -232,7 +235,7 @@ private extension Clean {
 """
 Enter input `number` to clean desired folder:
 0 -> 🥳 All, but not derived data
-1 -> Simulators Data
+1 -> Simulators Data & ⚠️  Keychain
 2 -> Cloned simulators Data & UserDefaults
 3 -> Derived Data
 4 -> Archives
