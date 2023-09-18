@@ -92,7 +92,7 @@ struct Clean: ParsableCommand {
     
     private func deleteAllUnlessDerivedData() throws {
         Print.withColor(.yellow, "deleting macOS DeviceSupport")
-        shell("rm -R ~/Library/Developer/Xcode/macOS' 'DeviceSupport")
+        shell("rm -R ~/Library/Developer/Xcode/iOS' 'DeviceSupport")
         Print.withColor(.yellow, "deleting simulators data & keychain")
         try deleteSimulatorsData()
         Print.withColor(.yellow, "deleting cloned simulators data")
