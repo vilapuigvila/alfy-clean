@@ -91,7 +91,7 @@ struct Clean: ParsableCommand {
     }
     
     private func deleteAllUnlessDerivedData() throws {
-        Print.withColor(.yellow, "deleting macOS DeviceSupport")
+        Print.withColor(.yellow, "deleting iOS DeviceSupport")
         shell("rm -R ~/Library/Developer/Xcode/iOS' 'DeviceSupport")
         Print.withColor(.yellow, "deleting simulators data & keychain")
         try deleteSimulatorsData()
@@ -237,7 +237,7 @@ Enter input `number` to clean desired folder:
 0 -> 🥳 All, but not derived data
 1 -> Simulators Data & ⚠️  Keychain
 2 -> Cloned simulators Data & UserDefaults
-3 -> Derived Data
+3 -> 🔥 🧨 Derived Data
 4 -> Archives
 5 -> Previews
 """
