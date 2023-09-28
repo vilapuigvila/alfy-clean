@@ -54,6 +54,7 @@ struct Clean: ParsableCommand {
         case .clonedSimulatorsData:
             try deleteClonedSimulatorsDataAndUserDefaults()
         case .derivedData, .archives, .previews:
+            Print.withColor(.yellow, "deleting \(optionInput)")
             let command = try optionInput.shellCommand()
             shell(command)
         }
