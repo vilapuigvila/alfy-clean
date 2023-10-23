@@ -53,9 +53,10 @@ struct Clean: ParsableCommand {
             try deleteSimulatorsData()
         case .clonedSimulatorsData:
             try deleteClonedSimulatorsDataAndUserDefaults()
-        case .derivedData, .archives, .previews:
+        case .derivedData, .archives, .previews, .messagesAttachments:
             Print.withColor(.yellow, "deleting \(optionInput)")
             let command = try optionInput.shellCommand()
+            Print.withColor(.red, command)
             shell(command)
         }
         isDone = true
@@ -79,7 +80,7 @@ struct Clean: ParsableCommand {
         try deleteSimulatorsData()
         try deleteClonedSimulatorsDataAndUserDefaults()
 
-        try (3...5).forEach {
+        try (3...6).forEach {
             do {
                 let option = try OptionInput(value: $0).shellCommand()
                 Print.withColor(.yellow, "deleting \(option)...")
@@ -99,7 +100,7 @@ struct Clean: ParsableCommand {
         Print.withColor(.yellow, "deleting cloned simulators data")
         try deleteClonedSimulatorsDataAndUserDefaults()
         
-        try (4...5).forEach {
+        try (4...6).forEach {
             do {
                 let option = try OptionInput(value: $0).shellCommand()
                 Print.withColor(.yellow, "deleting \(option)...")
@@ -201,7 +202,7 @@ struct Clean: ParsableCommand {
 extension Clean {
     
     enum OptionInput: Int, CaseIterable {
-        case noDerivedData, simultorsData, clonedSimulatorsData, derivedData, archives, previews
+        case noDerivedData, simultorsData, clonedSimulatorsData, derivedData, archives, previews, messagesAttachments
         // XCPGDevices && Xcode/iOS DeviceSupport
         init(value: Int) throws {
             switch value {
@@ -211,6 +212,7 @@ extension Clean {
             case 3: self = .derivedData
             case 4: self = .archives
             case 5: self = .previews
+            case 6: self = .messagesAttachments
             default: throw "Manage this case \(value)"
             }
         }
@@ -224,6 +226,7 @@ extension Clean {
             case .derivedData: return "rm -rf ~/Library/Developer/Xcode/DerivedData"
             case .archives: return "rm -rf ~/Library/Developer/Xcode/Archives"
             case .previews: return "rm -rf ~/Library/Developer/Xcode/UserData/Previews"
+            case .messagesAttachments: return  "rm -R ~/Library/Messages/Attachments"
             }
         }
     }
@@ -241,6 +244,7 @@ Enter input `number` to clean desired folder:
 3 -> 🔥 🧨 Derived Data
 4 -> Archives
 5 -> Previews
+6 -> 📩 Messages Attachments
 """
     }
     
@@ -259,5 +263,3 @@ folders list:
     }
     
 }
-
-//                Print.withColor(.green, "run: `sudo killall -9 com.apple.CoreSimulator.CoreSimulatorService`")
