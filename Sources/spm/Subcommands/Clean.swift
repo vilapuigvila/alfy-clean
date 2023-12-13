@@ -226,7 +226,7 @@ extension Clean {
             case .derivedData: return "rm -rf ~/Library/Developer/Xcode/DerivedData"
             case .archives: return "rm -rf ~/Library/Developer/Xcode/Archives"
             case .previews: return "rm -rf ~/Library/Developer/Xcode/UserData/Previews"
-            case .messagesAttachments: return  "rm -R ~/Library/Messages/Attachments"
+            case .messagesAttachments: return  "open ~/Library/Messages/Attachments"
             }
         }
     }
