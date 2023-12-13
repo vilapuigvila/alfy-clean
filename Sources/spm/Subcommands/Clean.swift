@@ -147,7 +147,7 @@ struct Clean: ParsableCommand {
                 shell("xcrun simctl erase \($0.lastPathComponent)")
                 shell("rm ~/Library/Developer/CoreSimulator/Devices/\($0.lastPathComponent)/data/Documents")                
                 shell("rm -R ~/Library/Developer/CoreSimulator/Devices/\($0.lastPathComponent)/data/Library/Keychains")
-
+                shell("rm -R ~/Library/Developer/CoreSimulator/Devices/\($0.lastPathComponent)/data/tmp")
             }
         } catch {
             throw "Can't delete simulators data \(#function)"
