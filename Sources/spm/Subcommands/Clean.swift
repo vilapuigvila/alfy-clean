@@ -53,7 +53,7 @@ struct Clean: ParsableCommand {
             try deleteSimulatorsData()
         case .clonedSimulatorsData:
             try deleteClonedSimulatorsDataAndUserDefaults()
-        case .derivedData, .archives, .previews, .messagesAttachments:
+        case .derivedData, .archives, .previews, .messagesAttachments, .microsoftTeamsCache:
             Print.withColor(.yellow, "deleting \(optionInput)")
             let command = try optionInput.shellCommand()
             Print.withColor(.red, command)
@@ -77,10 +77,11 @@ struct Clean: ParsableCommand {
             throw "Maybe you want to write `all` ?"
         }
         Print.withColor(.yellow, "all data...")
+        
         try deleteSimulatorsData()
         try deleteClonedSimulatorsDataAndUserDefaults()
 
-        try (3...6).forEach {
+        try (3...7).forEach {
             do {
                 let option = try OptionInput(value: $0).shellCommand()
                 Print.withColor(.yellow, "deleting \(option)...")
@@ -100,7 +101,7 @@ struct Clean: ParsableCommand {
         Print.withColor(.yellow, "deleting cloned simulators data")
         try deleteClonedSimulatorsDataAndUserDefaults()
         
-        try (4...6).forEach {
+        try (4...7).forEach {
             do {
                 let option = try OptionInput(value: $0).shellCommand()
                 Print.withColor(.yellow, "deleting \(option)...")
@@ -202,7 +203,7 @@ struct Clean: ParsableCommand {
 extension Clean {
     
     enum OptionInput: Int, CaseIterable {
-        case noDerivedData, simultorsData, clonedSimulatorsData, derivedData, archives, previews, messagesAttachments
+        case noDerivedData, simultorsData, clonedSimulatorsData, derivedData, archives, previews, messagesAttachments, microsoftTeamsCache
         // XCPGDevices && Xcode/iOS DeviceSupport
         init(value: Int) throws {
             switch value {
@@ -213,6 +214,7 @@ extension Clean {
             case 4: self = .archives
             case 5: self = .previews
             case 6: self = .messagesAttachments
+            case 7: self = .microsoftTeamsCache
             default: throw "Manage this case \(value)"
             }
         }
@@ -227,6 +229,7 @@ extension Clean {
             case .archives: return "rm -rf ~/Library/Developer/Xcode/Archives"
             case .previews: return "rm -rf ~/Library/Developer/Xcode/UserData/Previews"
             case .messagesAttachments: return  "open ~/Library/Messages/Attachments"
+            case .microsoftTeamsCache: return "rm -rf ~/Library/Application' 'Support/Microsoft/Teams"
             }
         }
     }
@@ -244,7 +247,8 @@ Enter input `number` to clean desired folder:
 3 -> 🔥 🧨 Derived Data
 4 -> Archives
 5 -> Previews
-6 -> 📩 Messages Attachments
+6 -> 📩 Open Messages Attachments folder
+7 -> Teams microsoft Cache
 """
     }
     
