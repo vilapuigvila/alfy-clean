@@ -136,7 +136,7 @@ struct Clean: ParsableCommand {
                 create: true
             )
             Print.withColor(.yellow, "deleting `Caches` simulators data")
-            shell("rm -R ~/Library/Developer/CoreSimulator/Caches")
+            shell("rm -rf ~/Library/Developer/CoreSimulator/Caches")
             
             let url = documentsDirectory.appendingPathComponent(
                 "Developer/CoreSimulator/Devices",
@@ -145,8 +145,9 @@ struct Clean: ParsableCommand {
             
             let subDirectories = try url.subDirectories()
             subDirectories.forEach {
+                Print.withColor(.blue, $0.lastPathComponent)
                 shell("xcrun simctl erase \($0.lastPathComponent)")
-                shell("rm ~/Library/Developer/CoreSimulator/Devices/\($0.lastPathComponent)/data/Documents")                
+                shell("rm ~/Library/Developer/CoreSimulator/Devices/\($0.lastPathComponent)/data/Documents")
                 shell("rm -R ~/Library/Developer/CoreSimulator/Devices/\($0.lastPathComponent)/data/Library/Keychains")
                 shell("rm -R ~/Library/Developer/CoreSimulator/Devices/\($0.lastPathComponent)/data/tmp")
             }
