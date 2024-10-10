@@ -10,7 +10,7 @@ import ArgumentParser
 
 struct Constant {
   struct App {
-    static let version = "0.0.1"
+    static let version = "0.0.2"
   }
 }
 
@@ -19,7 +19,7 @@ struct Avp: ParsableCommand {
     abstract: "avp helper",
     version: "avp version \(Constant.App.version)",
     subcommands: [
-        Cache.self, Clean.self
+        Cache.self, Clean.self, Pusher.self
     ]
   )
 }
