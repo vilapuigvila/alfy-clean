@@ -7,8 +7,6 @@
 
 import Foundation
 
-extension String: Error { }
-
 extension URL {
     func subDirectories() throws -> [URL] {
         if #available(macOS 10.11, *) {
