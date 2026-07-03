@@ -50,8 +50,12 @@ extension Cache {
                 for path in folder.paths {
                     let cmd = "du -hs \(path)"
                     Print.h6(verbose, cmd)
-                    let output = shell(cmd)
-                    print(output)
+                    let result = shell(cmd)
+                    if result.success {
+                        print(result.output)
+                    } else {
+                        Print.withColor(.red, "Error: \(cmd) failed with code \(result.exitCode)")
+                    }
                 }
             }
         }

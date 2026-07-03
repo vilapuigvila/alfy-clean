@@ -5,6 +5,7 @@
 //  Created by albert vila on 6/2/22.
 //
 
+import Darwin
 import Foundation
 
 class AVPTimer: NSObject {
@@ -24,6 +25,7 @@ class AVPTimer: NSObject {
                     case 3: return "🙏 🙏 🙏"
                         default: fatalError("glups..") }
                 }
+
                 Print.keepingLine(text, .magenta)
                 self.runCount += 1
             })

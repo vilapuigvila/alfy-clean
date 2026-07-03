@@ -7,8 +7,14 @@
 
 import Foundation
 
+struct ShellResult {
+    let output: String
+    let exitCode: Int32
+    var success: Bool { exitCode == 0 }
+}
+
 @discardableResult
-func shell(_ command: String) -> String {
+func shell(_ command: String) -> ShellResult {
     let task = Process()
     let pipe = Pipe()
     task.standardOutput = pipe
@@ -16,11 +22,12 @@ func shell(_ command: String) -> String {
     task.arguments = ["-c", command]
     task.launchPath = "/bin/zsh"
     task.launch()
-    
+    task.waitUntilExit()
+
     let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    let output = String(data: data, encoding: .utf8)!
-    
-    return output
+    let output = String(data: data, encoding: .utf8) ?? ""
+
+    return ShellResult(output: output, exitCode: task.terminationStatus)
 }
 
 func keyboardInput(

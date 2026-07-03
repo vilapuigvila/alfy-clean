@@ -7,6 +7,7 @@
 
 // https://github.com/marcoconti83/Corazza
 
+import Darwin
 import Foundation
 
 final class Prompt {
@@ -144,6 +145,221 @@ final class Prompt {
             customPrint("")
         }
     }
+
+    /// Shows an interactive checkbox list in the terminal.
+    /// Use Up/Down arrows to move, Space to toggle, and Enter to confirm.
+    public func checkboxOptions<T>(
+        _ options: [T],
+        question: String? = nil,
+        label: (T) -> String = { "\($0)" }
+    ) -> [T] {
+        guard !options.isEmpty else { return [] }
+        guard isatty(STDIN_FILENO) != 0 else {
+            return lineInputCheckboxOptions(options, question: question, label: label)
+        }
+
+        var selectedIndexes = Set<Int>()
+        var focusedIndex = 0
+        var renderedLineCount = 0
+
+        guard let rawMode = TerminalRawMode() else {
+            return lineInputCheckboxOptions(options, question: question, label: label)
+        }
+        defer {
+            rawMode.restore()
+            writeTerminal("\u{001B}[?25h")
+        }
+
+        writeTerminal("\u{001B}[?25l")
+
+        func render() {
+            if renderedLineCount > 0 {
+                writeTerminal("\u{001B}[\(renderedLineCount)A")
+                writeTerminal("\u{001B}[J")
+            }
+
+            var lines: [String] = []
+            if let question = question {
+                lines.append(contentsOf: question.components(separatedBy: .newlines))
+            }
+            lines.append("\(Print.Color.dim.rawValue)↑/↓ move  •  space select  •  enter confirm  •  q cancel\(Print.Color.reset.rawValue)")
+            lines.append("")
+
+            for index in options.indices {
+                let isFocused = index == focusedIndex
+                let isSelected = selectedIndexes.contains(index)
+                let focus = isFocused ? "❯" : " "
+                let checkbox = isSelected ? "☑" : "☐"
+                let line = "\(focus) \(checkbox) \(label(options[index]))"
+
+                if isFocused {
+                    lines.append("\(Print.Color.boldGreen.rawValue)\(line)\(Print.Color.reset.rawValue)")
+                } else if isSelected {
+                    lines.append("\(Print.Color.green.rawValue)\(line)\(Print.Color.reset.rawValue)")
+                } else {
+                    lines.append(line)
+                }
+            }
+
+            renderedLineCount = lines.count
+            writeTerminal(lines.joined(separator: "\n") + "\n")
+        }
+
+        render()
+
+        while true {
+            switch readTerminalKey() {
+            case .up:
+                focusedIndex = focusedIndex == 0 ? options.count - 1 : focusedIndex - 1
+                render()
+            case .down:
+                focusedIndex = focusedIndex == options.count - 1 ? 0 : focusedIndex + 1
+                render()
+            case .space:
+                if selectedIndexes.contains(focusedIndex) {
+                    selectedIndexes.remove(focusedIndex)
+                } else {
+                    selectedIndexes.insert(focusedIndex)
+                }
+                render()
+            case .enter:
+                writeTerminal("\n")
+                return selectedIndexes.sorted().map { options[$0] }
+            case .character(let byte) where byte == CharacterKey.q:
+                writeTerminal("\n")
+                return []
+            case .character(let byte) where byte == CharacterKey.k:
+                focusedIndex = focusedIndex == 0 ? options.count - 1 : focusedIndex - 1
+                render()
+            case .character(let byte) where byte == CharacterKey.j:
+                focusedIndex = focusedIndex == options.count - 1 ? 0 : focusedIndex + 1
+                render()
+            case .unknown, .character:
+                continue
+            }
+        }
+    }
+
+    private func lineInputCheckboxOptions<T>(
+        _ options: [T],
+        question: String?,
+        label: (T) -> String
+    ) -> [T] {
+        while true {
+            if let question = question {
+                customPrint(question)
+            }
+
+            for index in options.indices {
+                customPrint("  [\(index)] ☐ \(label(options[index]))")
+            }
+            customPrint("")
+            customPrint("Choose one or more options separated by commas", terminator: " › ")
+
+            guard let answer = customReadline(true)?.trim else {
+                fatalError("EOF?")
+            }
+
+            if answer.isEmpty {
+                return []
+            }
+
+            let indexes = answer
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+            let parsedIndexes = indexes.compactMap(Int.init)
+            let hasOnlyValidIndexes = parsedIndexes.count == indexes.count
+                && parsedIndexes.allSatisfy { options.indices.contains($0) }
+
+            if hasOnlyValidIndexes {
+                return parsedIndexes.map { options[$0] }
+            }
+
+            customPrint(Prompt.notValidAnswer)
+            customPrint("")
+        }
+    }
+}
+
+private enum TerminalKey {
+    case up
+    case down
+    case space
+    case enter
+    case character(UInt8)
+    case unknown
+}
+
+private enum CharacterKey {
+    static let escape: UInt8 = 27
+    static let leftBracket: UInt8 = 91
+    static let arrowUp: UInt8 = 65
+    static let arrowDown: UInt8 = 66
+    static let enter: UInt8 = 10
+    static let carriageReturn: UInt8 = 13
+    static let space: UInt8 = 32
+    static let j: UInt8 = 106
+    static let k: UInt8 = 107
+    static let q: UInt8 = 113
+}
+
+private final class TerminalRawMode {
+    private var original = termios()
+    private var restored = false
+
+    init?() {
+        guard tcgetattr(STDIN_FILENO, &original) == 0 else { return nil }
+
+        var raw = original
+        raw.c_lflag &= ~tcflag_t(ECHO | ICANON)
+
+        guard tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0 else { return nil }
+    }
+
+    deinit {
+        restore()
+    }
+
+    func restore() {
+        guard !restored else { return }
+        tcsetattr(STDIN_FILENO, TCSANOW, &original)
+        restored = true
+    }
+}
+
+private func readTerminalKey() -> TerminalKey {
+    let data = FileHandle.standardInput.readData(ofLength: 1)
+    guard let byte = data.first else { return .unknown }
+
+    switch byte {
+    case CharacterKey.enter, CharacterKey.carriageReturn:
+        return .enter
+    case CharacterKey.space:
+        return .space
+    case CharacterKey.escape:
+        let sequence = FileHandle.standardInput.readData(ofLength: 2)
+        guard sequence.count == 2,
+              sequence[sequence.startIndex] == CharacterKey.leftBracket else {
+            return .unknown
+        }
+
+        switch sequence[sequence.index(after: sequence.startIndex)] {
+        case CharacterKey.arrowUp:
+            return .up
+        case CharacterKey.arrowDown:
+            return .down
+        default:
+            return .unknown
+        }
+    default:
+        return .character(byte)
+    }
+}
+
+private func writeTerminal(_ string: String) {
+    guard let data = string.data(using: .utf8) else { return }
+    FileHandle.standardOutput.write(data)
 }
 
 typealias PrintFunction = ([Any], _ separator: String, _ terminator: String) -> Void
