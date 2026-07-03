@@ -19,6 +19,7 @@ final class avpTests: XCTestCase {
 
         let process = Process()
         process.executableURL = fooBinary
+        process.arguments = ["--version"]
 
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -29,7 +30,7 @@ final class avpTests: XCTestCase {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let output = String(data: data, encoding: .utf8)
 
-        XCTAssertEqual(output, "Hello, world!\n")
+        XCTAssertEqual(output, "avp version 0.0.2\n")
         #endif
     }
 

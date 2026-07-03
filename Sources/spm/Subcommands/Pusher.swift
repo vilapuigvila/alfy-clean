@@ -7,10 +7,7 @@
 
 import Foundation
 import ArgumentParser
-import CryptoKit
 import SwiftJWT
-import Crypto
-import JWTKit
 
 final class Pusher: ParsableCommand {
     public static let configuration = CommandConfiguration(
