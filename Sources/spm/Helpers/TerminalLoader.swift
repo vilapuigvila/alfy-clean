@@ -13,26 +13,39 @@ final class TerminalLoader {
     private let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     private let queue = DispatchQueue(label: "avp.terminal-loader")
     private let isInteractive = isatty(STDOUT_FILENO) != 0
+    private let displayDelay: TimeInterval = 1
+    private let minimumVisibleDuration: TimeInterval = 1.5
     private var timer: DispatchSourceTimer?
     private var frameIndex = 0
+    private var didRender = false
+    private var didStop = false
+    private var visibleStartedAt: TimeInterval?
 
     init(_ message: String) {
         self.message = message
     }
 
     func start() {
-        guard isInteractive else {
-            customPrint("• \(message)...")
-            return
-        }
-
-        write("\u{001B}[?25l")
-        render(frame: frames[frameIndex], color: .cyan)
-
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 0.1, repeating: 0.1)
+        timer.schedule(deadline: .now() + displayDelay, repeating: 0.1)
         timer.setEventHandler { [weak self] in
             guard let self = self else { return }
+            guard !self.didStop else { return }
+
+            if !self.didRender {
+                self.didRender = true
+                self.visibleStartedAt = ProcessInfo.processInfo.systemUptime
+
+                guard self.isInteractive else {
+                    customPrint("• \(self.message)...")
+                    return
+                }
+
+                self.write("\u{001B}[?25l")
+            }
+
+            guard self.isInteractive else { return }
+
             self.frameIndex = (self.frameIndex + 1) % self.frames.count
             self.render(frame: self.frames[self.frameIndex], color: .cyan)
         }
@@ -49,8 +62,28 @@ final class TerminalLoader {
     }
 
     private func stop(symbol: String, color: Print.Color) {
-        timer?.cancel()
-        timer = nil
+        var shouldRenderFinalState = false
+        var remainingVisibleTime: TimeInterval = 0
+
+        queue.sync {
+            didStop = true
+            timer?.cancel()
+            timer = nil
+
+            guard didRender else { return }
+
+            shouldRenderFinalState = true
+            if let visibleStartedAt = visibleStartedAt {
+                let visibleDuration = ProcessInfo.processInfo.systemUptime - visibleStartedAt
+                remainingVisibleTime = max(0, minimumVisibleDuration - visibleDuration)
+            }
+        }
+
+        guard shouldRenderFinalState else { return }
+
+        if remainingVisibleTime > 0 {
+            Thread.sleep(forTimeInterval: remainingVisibleTime)
+        }
 
         guard isInteractive else {
             customPrint("\(symbol) \(message)")

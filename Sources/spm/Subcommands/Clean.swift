@@ -7,6 +7,7 @@
 
 import Foundation
 import ArgumentParser
+import UserNotifications
 
 struct Clean: ParsableCommand {
     public static let configuration = CommandConfiguration(
@@ -51,7 +52,7 @@ struct Clean: ParsableCommand {
         }
 
         if shouldConfirmDelete(for: optionInputs) {
-            let confirmDelete = Prompt().yesNo("⚠️  This will erase simulator data and keychains. Continue?")
+            let confirmDelete = Prompt().yesNo("⚠️  This will delete simulator data, archives, or build cache. Continue?")
             if !confirmDelete {
                 Print.withColor(.yellow, "Cancelled.")
                 return
@@ -95,10 +96,11 @@ struct Clean: ParsableCommand {
         try deleteSimulatorsData()
         try deleteClonedSimulatorsDataAndUserDefaults()
 
-        try (3..<OptionInput.allCases.count).forEach {
+        try OptionInput.allCases
+            .filter { $0.rawValue >= 3 && $0.runsInAllCleanup }
+            .forEach {
             do {
-                let optionInput = try OptionInput(value: $0)
-                try runCleanup(optionInput)
+                try runCleanup($0)
             } catch {
                 throw error
             }
@@ -118,10 +120,11 @@ struct Clean: ParsableCommand {
         try deleteSimulatorsData()
         try deleteClonedSimulatorsDataAndUserDefaults()
 
-        try (4..<OptionInput.allCases.count).forEach {
+        try OptionInput.allCases
+            .filter { $0.rawValue >= 4 && $0.runsInAllCleanup }
+            .forEach {
             do {
-                let optionInput = try OptionInput(value: $0)
-                try runCleanup(optionInput)
+                try runCleanup($0)
             } catch {
                 throw error
             }
@@ -145,6 +148,8 @@ struct Clean: ParsableCommand {
         optionInputs.contains(.simultorsData)
             || optionInputs.contains(.clonedSimulatorsData)
             || optionInputs.contains(.noDerivedData)
+            || optionInputs.contains(.archives)
+            || optionInputs.contains(.derivedData)
     }
 
     private func runCleanup(_ optionInput: OptionInput) throws {
@@ -155,7 +160,9 @@ struct Clean: ParsableCommand {
             try deleteSimulatorsData()
         case .clonedSimulatorsData:
             try deleteClonedSimulatorsDataAndUserDefaults()
-        case .derivedData, .archives, .previews, .messagesAttachments, .microsoftTeamsCache, .trash:
+        case .largeSystemFolders:
+            try listLargeSystemFolders()
+        case .derivedData, .archives, .previews, .messagesAttachments, .microsoftTeamsCache, .documentationCache, .trash:
             let command = try optionInput.shellCommand()
             try runWithLoader("Cleaning \(optionInput.title)") {
                 let result = shell(command)
@@ -164,6 +171,24 @@ struct Clean: ParsableCommand {
                 }
             }
         }
+    }
+
+    private func listLargeSystemFolders() throws {
+        var output = ""
+
+        try runWithLoader("Scanning system folders larger than 5 GB (this may take a moment)") {
+            output = SystemScanner.listLargeFolders()
+        }
+
+        Print.withColor(.boldGreen, "Deepest folders larger than 5 GB")
+        if output.isEmpty {
+            Print.withColor(.yellow, "No folders larger than 5 GB found in scanned locations.")
+        } else {
+            Print.withColor(.cyan, "Showing largest 50 deepest folders (parent folders excluded):\n")
+            customPrint(output)
+        }
+
+        sendScanCompletionNotification()
     }
     
     private func deleteSimulatorsData() throws {
@@ -245,6 +270,36 @@ struct Clean: ParsableCommand {
         customPrint("")
         customPrint(try systemStorageMessage())
     }
+
+    /// Sends a macOS system notification to confirm scan completion.
+    /// Requests user authorization on first use (async). If user denies, silently continues without notification.
+    /// This is a non-critical feature; any failures are silently ignored.
+    private func sendScanCompletionNotification() {
+        let center = UNUserNotificationCenter.current()
+
+        // Request authorization (async; user may see permission prompt on first call)
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            guard granted else {
+                // User denied permission; do not show notification or error message
+                return
+            }
+
+            // Create notification with simple completion message
+            let content = UNMutableNotificationContent()
+            content.title = "avp"
+            content.body = "Folder scan complete"
+            content.sound = .default
+
+            // Schedule notification to appear after 1 second (gives terminal output time to settle)
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
+
+            // Add request; silently ignore errors (notification is non-critical)
+            center.add(request) { error in
+                _ = error
+            }
+        }
+    }
 }
 
 // MARK: Options -
@@ -252,8 +307,18 @@ struct Clean: ParsableCommand {
 extension Clean {
     
     enum OptionInput: Int, CaseIterable {
-        case noDerivedData, simultorsData, clonedSimulatorsData, derivedData, archives, previews, messagesAttachments, microsoftTeamsCache, trash
-        // XCPGDevices && Xcode/iOS DeviceSupport
+        // Low-risk: auto-regenerate on next use
+        case noDerivedData                  // All except DerivedData
+        case simultorsData                  // iOS simulator runtimes & device data
+        case clonedSimulatorsData           // Cloned devices for tests & Previews
+        case derivedData                    // Build artifacts & cache (slow rebuild)
+        case archives                       // ⚠️ Old IPA builds (cannot regenerate)
+        case previews                       // Xcode Preview cache
+        case messagesAttachments            // macOS Messages attachments
+        case microsoftTeamsCache            // Microsoft Teams local cache
+        case documentationCache             // QuickHelp docs (regenerates on access)
+        case trash                          // System trash bin
+        case largeSystemFolders             // Scan for large system folders (info only)
         init(value: Int) throws {
             switch value {
             case 0: self = .noDerivedData
@@ -264,7 +329,9 @@ extension Clean {
             case 5: self = .previews
             case 6: self = .messagesAttachments
             case 7: self = .microsoftTeamsCache
-            case 8: self = .trash
+            case 8: self = .documentationCache
+            case 9: self = .trash
+            case 10: self = .largeSystemFolders
             default: throw "Manage this case \(value)"
             }
         }
@@ -280,8 +347,14 @@ extension Clean {
             case .previews: return "Previews"
             case .messagesAttachments: return "📩 Open Messages Attachments folder"
             case .microsoftTeamsCache: return "Teams microsoft Cache"
+            case .documentationCache: return "QuickHelp Documentation Cache"
             case .trash: return "🗑️ System Trash"
+            case .largeSystemFolders: return "🔎 List system folders > 5 GB"
             }
+        }
+
+        var runsInAllCleanup: Bool {
+            self != .largeSystemFolders
         }
 
         var estimatedPaths: [String] {
@@ -295,6 +368,7 @@ extension Clean {
                     "~/Library/Developer/XCPGDevices",
                     "~/Library/Developer/Xcode/Archives",
                     "~/Library/Developer/Xcode/UserData/Previews",
+                    "~/Library/Developer/Xcode/DocumentationCache",
                     "~/Library/Messages/Attachments",
                     "~/Library/Application Support/Microsoft/Teams",
                     "~/.Trash"
@@ -319,8 +393,12 @@ extension Clean {
                 return ["~/Library/Messages/Attachments"]
             case .microsoftTeamsCache:
                 return ["~/Library/Application Support/Microsoft/Teams"]
+            case .documentationCache:
+                return ["~/Library/Developer/Xcode/DocumentationCache"]
             case .trash:
                 return ["~/.Trash"]
+            case .largeSystemFolders:
+                return []
             }
         }
         
@@ -334,7 +412,9 @@ extension Clean {
             case .previews: return "rm -rf ~/Library/Developer/Xcode/UserData/Previews"
             case .messagesAttachments: return  "open ~/Library/Messages/Attachments"
             case .microsoftTeamsCache: return "rm -rf ~/Library/Application' 'Support/Microsoft/Teams"
+            case .documentationCache: return "rm -Rf ~/Library/Developer/Xcode/DocumentationCache"
             case .trash: return "if [ -d ~/.Trash ]; then find ~/.Trash -mindepth 1 -maxdepth 1 -exec rm -rf {} +; fi"
+            case .largeSystemFolders: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             }
         }
     }
@@ -352,6 +432,13 @@ private extension Clean {
         let estimatesByPath = diskUsageEstimatesByPath()
 
         return OptionInput.allCases.map { optionInput in
+            if optionInput == .largeSystemFolders {
+                return OptionDisplay(
+                    input: optionInput,
+                    label: "\(optionInput.title)  \(Print.Color.dim.rawValue)scan only\(Print.Color.reset.rawValue)"
+                )
+            }
+
             let estimate = estimatedFreeSpace(for: optionInput, estimatesByPath: estimatesByPath)
             let prefix = estimate.isPartial ? "~" : ""
             let estimateText = "\(Print.Color.dim.rawValue)will free \(prefix)\(formatStorage(estimate.bytes))\(Print.Color.reset.rawValue)"
