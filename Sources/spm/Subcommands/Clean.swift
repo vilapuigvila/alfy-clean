@@ -7,7 +7,6 @@
 
 import Foundation
 import ArgumentParser
-import UserNotifications
 
 struct Clean: ParsableCommand {
     public static let configuration = CommandConfiguration(
@@ -156,10 +155,13 @@ struct Clean: ParsableCommand {
         switch optionInput {
         case .noDerivedData:
             try deleteAllUnlessDerivedData()
+            sendNotification(message: "All cleanup complete")
         case .simultorsData:
             try deleteSimulatorsData()
+            sendNotification(message: "Simulators cleaned")
         case .clonedSimulatorsData:
             try deleteClonedSimulatorsDataAndUserDefaults()
+            sendNotification(message: "Test devices cleaned")
         case .largeSystemFolders:
             try listLargeSystemFolders()
         case .derivedData, .archives, .previews, .messagesAttachments, .microsoftTeamsCache, .documentationCache, .trash:
@@ -170,6 +172,7 @@ struct Clean: ParsableCommand {
                     throw "Command failed with exit code \(result.exitCode): \(command)"
                 }
             }
+            sendNotification(message: "\(optionInput.title) cleaned")
         }
     }
 
@@ -271,34 +274,33 @@ struct Clean: ParsableCommand {
         customPrint(try systemStorageMessage())
     }
 
-    /// Sends a macOS system notification to confirm scan completion.
-    /// Requests user authorization on first use (async). If user denies, silently continues without notification.
-    /// This is a non-critical feature; any failures are silently ignored.
-    private func sendScanCompletionNotification() {
-        let center = UNUserNotificationCenter.current()
+    /// Sends a macOS system notification via osascript/AppleScript with a custom message and sound.
+    /// Returns immediately without waiting for user interaction.
+    /// Silently ignores all errors (osascript unavailable, permission denied, etc.)
+    /// since notifications are non-critical to the main task.
+    private func sendNotification(message: String) {
+        let script = "display notification \"\(message)\" with title \"avp\" sound name \"Glass\""
+        let task = Process()
+        let pipe = Pipe()
 
-        // Request authorization (async; user may see permission prompt on first call)
-        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
-            guard granted else {
-                // User denied permission; do not show notification or error message
-                return
-            }
+        task.standardOutput = pipe
+        task.standardError = pipe
+        task.arguments = ["-e", script]
+        task.launchPath = "/usr/bin/osascript"
 
-            // Create notification with simple completion message
-            let content = UNMutableNotificationContent()
-            content.title = "avp"
-            content.body = "Folder scan complete"
-            content.sound = .default
-
-            // Schedule notification to appear after 1 second (gives terminal output time to settle)
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
-
-            // Add request; silently ignore errors (notification is non-critical)
-            center.add(request) { error in
-                _ = error
-            }
+        do {
+            try task.run()
+            task.waitUntilExit()
+            // Notification sent; ignore result (success or failure)
+        } catch {
+            // osascript not available or other error
+            // Silently continue; notification failure should not interrupt the user's task
         }
+    }
+
+    /// Sends a notification for scan completion (used by listLargeSystemFolders).
+    private func sendScanCompletionNotification() {
+        sendNotification(message: "Folder scan complete")
     }
 }
 
@@ -339,10 +341,10 @@ extension Clean {
 
         var title: String {
             switch self {
-            case .noDerivedData: return "🥳 All, but not derived data"
+            case .derivedData: return "🔥 🧨 Derived Data"
+            case .noDerivedData: return "🥳 All, -> derived data excluded"
             case .simultorsData: return "Simulators Data & ⚠️  Keychain"
             case .clonedSimulatorsData: return "Cloned simulators Data & UserDefaults"
-            case .derivedData: return "🔥 🧨 Derived Data"
             case .archives: return "Archives"
             case .previews: return "Previews"
             case .messagesAttachments: return "📩 Open Messages Attachments folder"
