@@ -479,18 +479,15 @@ private extension Clean {
         }
     }
 
-    struct DiskUsageEstimate {
-        let bytes: UInt64
-        let isPartial: Bool
-
-        static let zero = DiskUsageEstimate(bytes: 0, isPartial: false)
-    }
+    typealias DiskUsageEstimate = DiskUsage
 
     func diskUsageEstimatesByPath() -> [String: DiskUsageEstimate] {
-        let uniquePaths = Set(OptionInput.allCases.flatMap { $0.estimatedPaths })
-        return uniquePaths.reduce(into: [:]) { result, path in
-            result[path] = diskUsageEstimate(for: path)
-        }
+        let uniquePaths = Array(Set(OptionInput.allCases.flatMap { $0.estimatedPaths }))
+        let loader = TerminalLoader("Measuring folder sizes (this may take a minute)")
+        loader.start()
+        let result = DiskUsage.measure(paths: uniquePaths)
+        loader.succeed()
+        return result
     }
 
     func estimatedFreeSpace(
@@ -504,69 +501,6 @@ private extension Clean {
                 isPartial: total.isPartial || estimate.isPartial
             )
         }
-    }
-
-    func diskUsageEstimate(for path: String) -> DiskUsageEstimate {
-        let expandedPath = (path as NSString).expandingTildeInPath
-        let url = URL(fileURLWithPath: expandedPath)
-        var isDirectory = ObjCBool(false)
-
-        guard FileManager.default.fileExists(atPath: expandedPath, isDirectory: &isDirectory) else {
-            return .zero
-        }
-
-        guard isDirectory.boolValue else {
-            return DiskUsageEstimate(bytes: allocatedSize(of: url), isPartial: false)
-        }
-
-        let keys: [URLResourceKey] = [
-            .fileAllocatedSizeKey,
-            .totalFileAllocatedSizeKey
-        ]
-        guard let enumerator = FileManager.default.enumerator(
-            at: url,
-            includingPropertiesForKeys: keys,
-            options: [],
-            errorHandler: { _, _ in true }
-        ) else {
-            return .zero
-        }
-
-        let startedAt = ProcessInfo.processInfo.systemUptime
-        let timeLimit = 0.35
-        let entryLimit = 3_000
-        var bytes = allocatedSize(of: url)
-        var entryCount = 0
-
-        for case let fileURL as URL in enumerator {
-            bytes += allocatedSize(of: fileURL)
-            entryCount += 1
-
-            if entryCount >= entryLimit || ProcessInfo.processInfo.systemUptime - startedAt >= timeLimit {
-                return DiskUsageEstimate(bytes: bytes, isPartial: true)
-            }
-        }
-
-        return DiskUsageEstimate(bytes: bytes, isPartial: false)
-    }
-
-    func allocatedSize(of url: URL) -> UInt64 {
-        guard let values = try? url.resourceValues(forKeys: [
-            .totalFileAllocatedSizeKey,
-            .fileAllocatedSizeKey
-        ]) else {
-            return 0
-        }
-
-        if let totalFileAllocatedSize = values.totalFileAllocatedSize {
-            return UInt64(totalFileAllocatedSize)
-        }
-
-        if let fileAllocatedSize = values.fileAllocatedSize {
-            return UInt64(fileAllocatedSize)
-        }
-
-        return 0
     }
 
     func storageFrame(capacity: String, busy: String) -> String {
@@ -589,15 +523,7 @@ private extension Clean {
     }
 
     func formatStorage(_ bytes: UInt64) -> String {
-        let megabyte = 1_000_000.0
-        let gigabyte = 1_000_000_000.0
-        let value = Double(bytes)
-
-        if value >= gigabyte {
-            return String(format: "%.1f GB", value / gigabyte)
-        }
-
-        return String(format: "%.0f MB", value / megabyte)
+        DiskUsage.format(bytes)
     }
 
     static var foldersName: String {

@@ -48,14 +48,14 @@ extension Cache {
             for folder in folders {
                 Print.h3(folder.rawValue)
                 for path in folder.paths {
-                    let cmd = "du -hs \(path)"
+                    let cmd = "du -sk \(path)"
                     Print.h6(verbose, cmd)
-                    let result = shell(cmd)
-                    if result.success {
-                        print(result.output)
-                    } else {
-                        Print.withColor(.red, "Error: \(cmd) failed with code \(result.exitCode)")
-                    }
+                    let loader = TerminalLoader("Measuring \(path)")
+                    loader.start()
+                    let usage = DiskUsage.measure(paths: [path])[path] ?? .zero
+                    loader.succeed()
+                    let prefix = usage.isPartial ? "~" : ""
+                    print("\(prefix)\(DiskUsage.format(usage.bytes))\t\(path)")
                 }
             }
         }
@@ -88,7 +88,7 @@ extension Cache.CacheFolder {
         case .testSimulatorsDevices:
             return ["~/Library/Developer/XCTestDevices"]
         case .deviceSupport:
-            return ["~/Library/Developer/Xcode/iOS\' 'DeviceSupport"]
+            return ["~/Library/Developer/Xcode/iOS DeviceSupport"]
         case .derivedData:
             return ["~/Library/Developer/Xcode/DerivedData"]
         case .previews:

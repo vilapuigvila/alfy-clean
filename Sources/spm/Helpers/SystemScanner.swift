@@ -38,7 +38,7 @@ struct SystemScanner {
     private static func buildScanCommand() -> String {
         """
         /usr/bin/du -k /Applications /Library /System "$HOME/Library" /private /opt /usr/local 2>/dev/null | \
-        /usr/bin/awk 'BEGIN { FS="\\t"; OFS=" " } $1 >= 5242880 {
+        /usr/bin/awk 'BEGIN { FS="\\t"; OFS=" " } $1 >= 4882813 {
           if (NF == 2) {
             paths[NR] = $2
           } else {
@@ -65,7 +65,7 @@ struct SystemScanner {
         }' | \
         /usr/bin/sort -rn | \
         /usr/bin/head -50 | \
-        /usr/bin/awk '{ size=$1; $1=""; sub(/^ /, ""); printf "  %.1f GB  %s\\n", size / 1048576, $0 }'
+        /usr/bin/awk '{ size=$1; $1=""; sub(/^ /, ""); printf "  %.1f GB  %s\\n", size * 1024 / 1000000000, $0 }'
         """
     }
 }
