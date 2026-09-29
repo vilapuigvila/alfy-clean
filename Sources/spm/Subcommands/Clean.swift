@@ -164,7 +164,11 @@ struct Clean: ParsableCommand {
             sendNotification(message: "Test devices cleaned")
         case .largeSystemFolders:
             try listLargeSystemFolders()
-        case .derivedData, .archives, .previews, .messagesAttachments, .microsoftTeamsCache, .documentationCache, .trash:
+        case .deviceSupport:
+            try deleteDeviceSupportVersions()
+        case .simulatorRuntimes:
+            try deleteSimulatorRuntimes()
+        case .derivedData, .archives, .previews, .messagesAttachments, .microsoftTeamsCache, .documentationCache, .trash, .homebrewCache:
             let command = try optionInput.shellCommand()
             try runWithLoader("Cleaning \(optionInput.title)") {
                 let result = shell(command)
@@ -174,6 +178,105 @@ struct Clean: ParsableCommand {
             }
             sendNotification(message: "\(optionInput.title) cleaned")
         }
+    }
+
+    private func deleteDeviceSupportVersions() throws {
+        let root = (OptionInput.deviceSupportPath as NSString).expandingTildeInPath
+        let folders = ((try? FileManager.default.contentsOfDirectory(atPath: root)) ?? [])
+            .filter { !$0.hasPrefix(".") }
+            .sorted { $0.compare($1, options: .numeric) == .orderedAscending }
+            .map { (root as NSString).appendingPathComponent($0) }
+
+        guard !folders.isEmpty else {
+            Print.withColor(.yellow, "No iOS DeviceSupport versions found.")
+            return
+        }
+
+        var usages: [String: DiskUsage] = [:]
+        try runWithLoader("Measuring iOS DeviceSupport versions") {
+            usages = DiskUsage.measure(paths: folders)
+        }
+
+        let selected = Prompt().checkboxOptions(
+            folders,
+            question: "\n\(Print.Color.boldGreen.rawValue)Select iOS DeviceSupport versions to delete\(Print.Color.reset.rawValue)",
+            label: { folder in
+                let usage = usages[folder] ?? .zero
+                let prefix = usage.isPartial ? "~" : ""
+                return "\((folder as NSString).lastPathComponent)  \(Print.Color.dim.rawValue)\(prefix)\(formatStorage(usage.bytes))\(Print.Color.reset.rawValue)"
+            }
+        )
+
+        guard !selected.isEmpty else {
+            Print.withColor(.yellow, "No versions selected.")
+            return
+        }
+
+        let names = selected.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")
+        let confirmDelete = Prompt().yesNo("⚠️  Delete \(names)? Xcode copies the files again the next time you plug in a device running that version.")
+        guard confirmDelete else {
+            Print.withColor(.yellow, "Cancelled.")
+            return
+        }
+
+        for folder in selected {
+            let name = (folder as NSString).lastPathComponent
+            do {
+                try runWithLoader("Deleting \(name)") {
+                    try FileManager.default.removeItem(atPath: folder)
+                }
+                Print.withColor(.green, "Deleted \(name)")
+            } catch {
+                Print.withColor(.red, "Failed to delete \(name): \(error)")
+            }
+        }
+        sendNotification(message: "iOS DeviceSupport cleaned")
+    }
+
+    private func deleteSimulatorRuntimes() throws {
+        var runtimes: [SimulatorRuntime] = []
+        try runWithLoader("Reading installed simulator runtimes") {
+            runtimes = SimulatorRuntimes.list()
+        }
+
+        guard !runtimes.isEmpty else {
+            Print.withColor(.yellow, "No deletable simulator runtimes found.")
+            return
+        }
+
+        let selected = Prompt().checkboxOptions(
+            runtimes,
+            question: "\n\(Print.Color.boldGreen.rawValue)Select simulator runtimes to delete\(Print.Color.reset.rawValue)",
+            label: { runtime in
+                let lastUsed = runtime.lastUsedDay.map { "  •  last used \($0)" } ?? ""
+                return "\(runtime.name)  \(Print.Color.dim.rawValue)\(formatStorage(runtime.sizeBytes))\(lastUsed)\(Print.Color.reset.rawValue)"
+            }
+        )
+
+        guard !selected.isEmpty else {
+            Print.withColor(.yellow, "No runtimes selected.")
+            return
+        }
+
+        let names = selected.map { $0.name }.joined(separator: ", ")
+        let confirmDelete = Prompt().yesNo("⚠️  Delete \(names)? Simulators using them become unavailable until you download the runtime again (Xcode ▸ Settings ▸ Components).")
+        guard confirmDelete else {
+            Print.withColor(.yellow, "Cancelled.")
+            return
+        }
+
+        for runtime in selected {
+            var result = ShellResult(output: "", exitCode: 0)
+            try runWithLoader("Deleting \(runtime.name)") {
+                result = SimulatorRuntimes.delete(runtime)
+            }
+            if result.success {
+                Print.withColor(.green, "Deleted \(runtime.name)")
+            } else {
+                Print.withColor(.red, "Failed to delete \(runtime.name): \(result.output)")
+            }
+        }
+        sendNotification(message: "Simulator runtimes cleaned")
     }
 
     private func listLargeSystemFolders() throws {
@@ -192,6 +295,53 @@ struct Clean: ParsableCommand {
         }
 
         sendScanCompletionNotification()
+
+        try deleteSafeLargeFolders(SystemScanner.safeToDelete(from: output))
+    }
+
+    private func deleteSafeLargeFolders(_ folders: [SystemScanner.LargeFolder]) throws {
+        guard !folders.isEmpty else {
+            Print.withColor(.yellow, "\nNone of these folders is on the safe-to-delete list.")
+            return
+        }
+
+        let selected = Prompt().checkboxOptions(
+            folders,
+            question: "\n\(Print.Color.boldGreen.rawValue)Safe to delete: select folders\(Print.Color.reset.rawValue)",
+            label: { folder in
+                "\(String(format: "%.1f GB", folder.gigabytes))  \(folder.path)  \(Print.Color.dim.rawValue)\(folder.note)\(Print.Color.reset.rawValue)"
+            }
+        )
+
+        guard !selected.isEmpty else {
+            Print.withColor(.yellow, "No folders selected.")
+            return
+        }
+
+        let total = selected.reduce(0) { $0 + $1.gigabytes }
+        let list = selected.map { "  \($0.path)" }.joined(separator: "\n")
+        let confirmDelete = Prompt().yesNo("⚠️  Delete \(selected.count) folder(s), \(String(format: "%.1f GB", total))?\n\(list)")
+        guard confirmDelete else {
+            Print.withColor(.yellow, "Cancelled.")
+            return
+        }
+
+        for folder in selected {
+            // Re-check against the allowlist right before deleting.
+            guard SystemScanner.safeDeleteNote(for: folder.path) != nil else {
+                Print.withColor(.red, "Skipped \(folder.path): not on the safe-to-delete list")
+                continue
+            }
+            do {
+                try runWithLoader("Deleting \(folder.path)") {
+                    try FileManager.default.removeItem(atPath: folder.path)
+                }
+                Print.withColor(.green, "Deleted \(folder.path)")
+            } catch {
+                Print.withColor(.red, "Failed to delete \(folder.path): \(error)")
+            }
+        }
+        sendNotification(message: "Large folders cleaned")
     }
     
     private func deleteSimulatorsData() throws {
@@ -274,19 +424,39 @@ struct Clean: ParsableCommand {
         customPrint(try systemStorageMessage())
     }
 
-    /// Sends a macOS system notification via osascript/AppleScript with a custom message and sound.
+    /// Homebrew's terminal-notifier, looked up by absolute path so a broken shim earlier on PATH
+    /// (e.g. the Intel-only rbenv gem) can't shadow it.
+    private static let terminalNotifierPaths = [
+        "/opt/homebrew/bin/terminal-notifier",
+        "/usr/local/bin/terminal-notifier"
+    ]
+
+    /// Sends a macOS system notification with a custom message and sound.
+    /// Prefers terminal-notifier so tapping the notification activates the terminal app that ran avp
+    /// (its bundle ID comes from `__CFBundleIdentifier`); falls back to osascript, whose notifications
+    /// open Script Editor on tap.
     /// Returns immediately without waiting for user interaction.
-    /// Silently ignores all errors (osascript unavailable, permission denied, etc.)
+    /// Silently ignores all errors (notifier unavailable, permission denied, etc.)
     /// since notifications are non-critical to the main task.
     private func sendNotification(message: String) {
-        let script = "display notification \"\(message)\" with title \"avp\" sound name \"Glass\""
         let task = Process()
         let pipe = Pipe()
 
         task.standardOutput = pipe
         task.standardError = pipe
-        task.arguments = ["-e", script]
-        task.launchPath = "/usr/bin/osascript"
+
+        if let notifier = Self.terminalNotifierPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            var arguments = ["-title", "avp", "-message", message, "-sound", "Glass"]
+            if let terminalBundleID = ProcessInfo.processInfo.environment["__CFBundleIdentifier"] {
+                arguments += ["-activate", terminalBundleID]
+            }
+            task.arguments = arguments
+            task.launchPath = notifier
+        } else {
+            let script = "display notification \"\(message)\" with title \"avp\" sound name \"Glass\""
+            task.arguments = ["-e", script]
+            task.launchPath = "/usr/bin/osascript"
+        }
 
         do {
             try task.run()
@@ -320,6 +490,9 @@ extension Clean {
         case microsoftTeamsCache            // Microsoft Teams local cache
         case documentationCache             // QuickHelp docs (regenerates on access)
         case trash                          // System trash bin
+        case homebrewCache                  // Homebrew downloads & old versions (brew cleanup)
+        case deviceSupport                  // Per-version device symbols (re-copied on device plug-in)
+        case simulatorRuntimes              // ⚠️ Installed runtimes (re-download to restore)
         case largeSystemFolders             // Scan for large system folders (info only)
         init(value: Int) throws {
             switch value {
@@ -333,7 +506,10 @@ extension Clean {
             case 7: self = .microsoftTeamsCache
             case 8: self = .documentationCache
             case 9: self = .trash
-            case 10: self = .largeSystemFolders
+            case 10: self = .homebrewCache
+            case 11: self = .deviceSupport
+            case 12: self = .simulatorRuntimes
+            case 13: self = .largeSystemFolders
             default: throw "Manage this case \(value)"
             }
         }
@@ -344,20 +520,25 @@ extension Clean {
             case .derivedData: return "🔥 🧨 Derived Data"
             case .noDerivedData: return "🥳 All, -> derived data excluded"
             case .simultorsData: return "Simulators Data & ⚠️  Keychain"
-            case .clonedSimulatorsData: return "Cloned simulators Data & UserDefaults"
+            case .clonedSimulatorsData: return "Cloned simulators (tests & Previews)"
             case .archives: return "Archives"
             case .previews: return "Previews"
             case .messagesAttachments: return "📩 Open Messages Attachments folder"
             case .microsoftTeamsCache: return "Teams microsoft Cache"
             case .documentationCache: return "QuickHelp Documentation Cache"
             case .trash: return "🗑️ System Trash"
+            case .homebrewCache: return "🍺 Homebrew Cache"
+            case .deviceSupport: return "📱 iOS DeviceSupport versions"
+            case .simulatorRuntimes: return "📦 Simulator runtimes"
             case .largeSystemFolders: return "🔎 List system folders > 5 GB"
             }
         }
 
         var runsInAllCleanup: Bool {
-            self != .largeSystemFolders
+            self != .largeSystemFolders && self != .simulatorRuntimes && self != .homebrewCache && self != .deviceSupport
         }
+
+        static let deviceSupportPath = "~/Library/Developer/Xcode/iOS DeviceSupport"
 
         var estimatedPaths: [String] {
             switch self {
@@ -399,7 +580,11 @@ extension Clean {
                 return ["~/Library/Developer/Xcode/DocumentationCache"]
             case .trash:
                 return ["~/.Trash"]
-            case .largeSystemFolders:
+            case .homebrewCache:
+                return ["~/Library/Caches/Homebrew"]
+            case .deviceSupport:
+                return [Self.deviceSupportPath]
+            case .simulatorRuntimes, .largeSystemFolders:
                 return []
             }
         }
@@ -416,6 +601,9 @@ extension Clean {
             case .microsoftTeamsCache: return "rm -rf ~/Library/Application' 'Support/Microsoft/Teams"
             case .documentationCache: return "rm -Rf ~/Library/Developer/Xcode/DocumentationCache"
             case .trash: return "if [ -d ~/.Trash ]; then find ~/.Trash -mindepth 1 -maxdepth 1 -exec rm -rf {} +; fi"
+            case .homebrewCache: return "PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\" brew cleanup --prune=all"
+            case .deviceSupport: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
+            case .simulatorRuntimes: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .largeSystemFolders: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             }
         }
@@ -432,6 +620,7 @@ private extension Clean {
 
     func optionDisplays() -> [OptionDisplay] {
         let estimatesByPath = diskUsageEstimatesByPath()
+        let runtimesBytes = SimulatorRuntimes.list().reduce(0) { $0 + $1.sizeBytes }
 
         return OptionInput.allCases.map { optionInput in
             if optionInput == .largeSystemFolders {
@@ -441,8 +630,22 @@ private extension Clean {
                 )
             }
 
+            if optionInput == .simulatorRuntimes {
+                return OptionDisplay(
+                    input: optionInput,
+                    label: "\(optionInput.title)  \(Print.Color.dim.rawValue)pick which  •  up to \(formatStorage(runtimesBytes))\(Print.Color.reset.rawValue)"
+                )
+            }
+
             let estimate = estimatedFreeSpace(for: optionInput, estimatesByPath: estimatesByPath)
             let prefix = estimate.isPartial ? "~" : ""
+
+            if optionInput == .deviceSupport {
+                return OptionDisplay(
+                    input: optionInput,
+                    label: "\(optionInput.title)  \(Print.Color.dim.rawValue)pick which  •  up to \(prefix)\(formatStorage(estimate.bytes))\(Print.Color.reset.rawValue)"
+                )
+            }
             let estimateText = "\(Print.Color.dim.rawValue)will free \(prefix)\(formatStorage(estimate.bytes))\(Print.Color.reset.rawValue)"
             return OptionDisplay(
                 input: optionInput,
