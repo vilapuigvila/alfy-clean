@@ -144,8 +144,7 @@ struct Clean: ParsableCommand {
     }
 
     private func shouldConfirmDelete(for optionInputs: [OptionInput]) -> Bool {
-        optionInputs.contains(.simultorsData)
-            || optionInputs.contains(.clonedSimulatorsData)
+        optionInputs.contains(.clonedSimulatorsData)
             || optionInputs.contains(.noDerivedData)
             || optionInputs.contains(.archives)
             || optionInputs.contains(.derivedData)
@@ -157,8 +156,7 @@ struct Clean: ParsableCommand {
             try deleteAllUnlessDerivedData()
             sendNotification(message: "All cleanup complete")
         case .simultorsData:
-            try deleteSimulatorsData()
-            sendNotification(message: "Simulators cleaned")
+            try eraseSelectedSimulators()
         case .clonedSimulatorsData:
             try deleteClonedSimulatorsDataAndUserDefaults()
             sendNotification(message: "Test devices cleaned")
@@ -178,6 +176,59 @@ struct Clean: ParsableCommand {
             }
             sendNotification(message: "\(optionInput.title) cleaned")
         }
+    }
+
+    private func eraseSelectedSimulators() throws {
+        var devices: [SimulatorDevice] = []
+        var usages: [String: DiskUsage] = [:]
+        try runWithLoader("Measuring simulators") {
+            devices = SimulatorDevices.list()
+            usages = DiskUsage.measure(paths: devices.map { $0.dataPath })
+        }
+
+        guard !devices.isEmpty else {
+            Print.withColor(.yellow, "No simulators found.")
+            return
+        }
+
+        // Heaviest first: those are the ones worth erasing.
+        devices.sort { (usages[$0.dataPath]?.bytes ?? 0) > (usages[$1.dataPath]?.bytes ?? 0) }
+
+        let selected = Prompt().checkboxOptions(
+            devices,
+            question: "\n\(Print.Color.boldGreen.rawValue)Select simulators to erase\(Print.Color.reset.rawValue)  \(Print.Color.dim.rawValue)apps, logins, keychain & settings are wiped; the device stays in Xcode\(Print.Color.reset.rawValue)",
+            label: { device in
+                let usage = usages[device.dataPath] ?? .zero
+                let prefix = usage.isPartial ? "~" : ""
+                let running = device.isBooted ? "  •  running" : ""
+                return "\(device.name)  \(Print.Color.dim.rawValue)\(device.runtime)  •  \(prefix)\(formatStorage(usage.bytes))\(running)\(Print.Color.reset.rawValue)"
+            }
+        )
+
+        guard !selected.isEmpty else {
+            Print.withColor(.yellow, "No simulators selected.")
+            return
+        }
+
+        let names = selected.map { "\($0.name) (\($0.runtime))" }.joined(separator: ", ")
+        let confirmDelete = Prompt().yesNo("⚠️  Erase \(names)? Their installed apps, logins, keychain and settings are lost. Running ones are shut down first.")
+        guard confirmDelete else {
+            Print.withColor(.yellow, "Cancelled.")
+            return
+        }
+
+        for device in selected {
+            var result = ShellResult(output: "", exitCode: 0)
+            try runWithLoader("Erasing \(device.name)") {
+                result = SimulatorDevices.erase(device)
+            }
+            if result.success {
+                Print.withColor(.green, "Erased \(device.name) (\(device.runtime))")
+            } else {
+                Print.withColor(.red, "Failed to erase \(device.name): \(result.output)")
+            }
+        }
+        sendNotification(message: "Simulators erased")
     }
 
     private func deleteDeviceSupportVersions() throws {
@@ -481,8 +532,8 @@ extension Clean {
     enum OptionInput: Int, CaseIterable {
         // Low-risk: auto-regenerate on next use
         case noDerivedData                  // All except DerivedData
-        case simultorsData                  // iOS simulator runtimes & device data
-        case clonedSimulatorsData           // Cloned devices for tests & Previews
+        case simultorsData                  // Erase chosen simulators (apps, data, keychains)
+        case clonedSimulatorsData           // Cloned devices for parallel tests & Playgrounds
         case derivedData                    // Build artifacts & cache (slow rebuild)
         case archives                       // ⚠️ Old IPA builds (cannot regenerate)
         case previews                       // Xcode Preview cache
@@ -519,8 +570,8 @@ extension Clean {
             switch self {
             case .derivedData: return "🔥 🧨 Derived Data"
             case .noDerivedData: return "🥳 All, -> derived data excluded"
-            case .simultorsData: return "Simulators Data & ⚠️  Keychain"
-            case .clonedSimulatorsData: return "Cloned simulators (tests & Previews)"
+            case .simultorsData: return "⚠️  Erase simulators (apps, logins, keychains)"
+            case .clonedSimulatorsData: return "Cloned simulators (tests & Playgrounds)"
             case .archives: return "Archives"
             case .previews: return "Previews"
             case .messagesAttachments: return "📩 Open Messages Attachments folder"
@@ -557,10 +608,7 @@ extension Clean {
                     "~/.Trash"
                 ]
             case .simultorsData:
-                return [
-                    "~/Library/Developer/CoreSimulator/Devices",
-                    "~/Library/Developer/CoreSimulator/Caches"
-                ]
+                return ["~/Library/Developer/CoreSimulator/Devices"]
             case .clonedSimulatorsData:
                 return [
                     "~/Library/Developer/XCTestDevices",
@@ -640,7 +688,7 @@ private extension Clean {
             let estimate = estimatedFreeSpace(for: optionInput, estimatesByPath: estimatesByPath)
             let prefix = estimate.isPartial ? "~" : ""
 
-            if optionInput == .deviceSupport {
+            if optionInput == .deviceSupport || optionInput == .simultorsData {
                 return OptionDisplay(
                     input: optionInput,
                     label: "\(optionInput.title)  \(Print.Color.dim.rawValue)pick which  •  up to \(prefix)\(formatStorage(estimate.bytes))\(Print.Color.reset.rawValue)"
