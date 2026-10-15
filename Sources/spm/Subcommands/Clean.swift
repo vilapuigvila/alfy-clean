@@ -38,6 +38,7 @@ struct Clean: ParsableCommand {
     // MARK: Main run -
 
     mutating func run() throws {
+        TerminalFocus.captureCurrentTerminal()
         guard try deleteAll() else {
             isDone = true
             return
@@ -510,8 +511,8 @@ struct Clean: ParsableCommand {
     ]
 
     /// Sends a macOS system notification with a custom message and sound.
-    /// Prefers terminal-notifier so tapping the notification activates the terminal app that ran avp
-    /// (its bundle ID comes from `__CFBundleIdentifier`); falls back to osascript, whose notifications
+    /// Prefers terminal-notifier so tapping the notification returns to the terminal that ran avp: the app
+    /// (its bundle ID comes from `__CFBundleIdentifier`) and, in Ghostty, the exact tab (see `TerminalFocus`); falls back to osascript, whose notifications
     /// open Script Editor on tap.
     /// Returns immediately without waiting for user interaction.
     /// Silently ignores all errors (notifier unavailable, permission denied, etc.)
@@ -521,6 +522,10 @@ struct Clean: ParsableCommand {
             var arguments = ["-title", "avp", "-message", message, "-sound", "Glass"]
             if let terminalBundleID = ProcessInfo.processInfo.environment["__CFBundleIdentifier"] {
                 arguments += ["-activate", terminalBundleID]
+            }
+            // Tapping it returns to the exact terminal tab that ran avp, not just the terminal app.
+            if let focusCommand = TerminalFocus.clickCommand {
+                arguments += ["-execute", focusCommand]
             }
             runProcess(notifier, arguments)
         } else {
