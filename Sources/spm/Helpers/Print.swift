@@ -11,6 +11,7 @@ struct Print {
   enum Color: String {
     case reset = "\u{001B}[0;0m"
     case dim = "\u{001B}[2m"
+    case bold = "\u{001B}[1m"
     case black = "\u{001B}[0;30m"
     case red = "\u{001B}[0;31m"
     case green = "\u{001B}[0;32m"

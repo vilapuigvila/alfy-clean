@@ -30,7 +30,7 @@ struct SimulatorDevices {
             let devices: [String: [SimulatorDevice]]
         }
 
-        let result = shell("xcrun simctl list devices -j 2>/dev/null")
+        let result = simctl(["list", "devices", "-j"], errorOutput: .discarded)
         guard result.success,
               let data = result.output.data(using: .utf8),
               let list = try? JSONDecoder().decode(DeviceList.self, from: data) else {
@@ -52,10 +52,10 @@ struct SimulatorDevices {
     /// Shuts the device down if it's running, then erases it (apps, data, keychain, settings).
     static func erase(_ device: SimulatorDevice) -> ShellResult {
         if device.isBooted {
-            let shutdown = shell("xcrun simctl shutdown \(device.udid)")
+            let shutdown = simctl(["shutdown", device.udid])
             guard shutdown.success else { return shutdown }
         }
-        return shell("xcrun simctl erase \(device.udid)")
+        return simctl(["erase", device.udid])
     }
 
     /// "com.apple.CoreSimulator.SimRuntime.iOS-26-4" -> "iOS 26.4"

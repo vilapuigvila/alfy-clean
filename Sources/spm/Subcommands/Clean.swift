@@ -111,7 +111,7 @@ struct Clean: ParsableCommand {
     private func deleteAllUnlessDerivedData() throws {
         var result = ShellResult(output: "", exitCode: 0)
         try runWithLoader("Cleaning iOS DeviceSupport") {
-            result = shell("rm -Rf ~/Library/Developer/Xcode/iOS' 'DeviceSupport")
+            result = runProcess("/bin/rm", ["-rf", expandTilde(OptionInput.deviceSupportPath)])
         }
         if !result.success {
             Print.withColor(.yellow, "iOS DeviceSupport deletion failed (may not exist)")
@@ -189,11 +189,16 @@ struct Clean: ParsableCommand {
         case .simulatorRuntimes:
             try deleteSimulatorRuntimes()
         case .derivedData, .archives, .previews, .messagesAttachments, .microsoftTeamsCache, .documentationCache, .trash, .homebrewCache, .maestroTests, .claudeJobsTmp:
-            let command = try optionInput.shellCommand()
+            let command = try optionInput.command()
+            // Nothing to clean (e.g. no Trash or jobs folder yet) counts as done, like an `rm -rf` of a missing folder.
+            if let required = command.requiredFolder,
+               !FileManager.default.fileExists(atPath: required) {
+                break
+            }
             try runWithLoader("Cleaning \(optionInput.title)") {
-                let result = shell(command)
+                let result = runProcess(command.executable, command.arguments, searchPath: command.searchPath)
                 if !result.success {
-                    throw "Command failed with exit code \(result.exitCode): \(command)"
+                    throw "Command failed with exit code \(result.exitCode): \(command.display)"
                 }
             }
             sendNotification(message: "\(optionInput.title) cleaned")
@@ -424,21 +429,21 @@ struct Clean: ParsableCommand {
 
         var result = ShellResult(output: "", exitCode: 0)
         try runWithLoader("Shutting down all simulators") {
-            result = shell("xcrun simctl shutdown all")
+            result = simctl(["shutdown", "all"])
         }
         if !result.success {
             Print.withColor(.yellow, "Shutdown had issues (simulators may already be off)")
         }
 
         try runWithLoader("Erasing all simulators") {
-            result = shell("xcrun simctl erase all")
+            result = simctl(["erase", "all"])
             guard result.success else {
                 throw "Failed to erase simulators: \(result.output)"
             }
         }
 
         try runWithLoader("Clearing CoreSimulator caches") {
-            result = shell("rm -Rf ~/Library/Developer/CoreSimulator/Caches")
+            result = runProcess("/bin/rm", ["-rf", expandTilde("~/Library/Developer/CoreSimulator/Caches")])
             if !result.success {
                 throw "Failed to clear CoreSimulator caches"
             }
@@ -457,7 +462,7 @@ struct Clean: ParsableCommand {
         if fileManager.fileExists(atPath: (testDevicesPath as NSString).expandingTildeInPath) {
             var result = ShellResult(output: "", exitCode: 0)
             try runWithLoader("Deleting XCTestDevices") {
-                result = shell("xcrun simctl --set \(testDevicesPath) delete all")
+                result = simctl(["--set", expandTilde(testDevicesPath), "delete", "all"])
             }
             if !result.success {
                 Print.withColor(.yellow, "XCTestDevices deletion had issues (may already be empty)")
@@ -469,7 +474,7 @@ struct Clean: ParsableCommand {
         if fileManager.fileExists(atPath: (previewDevicesPath as NSString).expandingTildeInPath) {
             var result = ShellResult(output: "", exitCode: 0)
             try runWithLoader("Deleting XCPGDevices previews") {
-                result = shell("xcrun simctl --set \(previewDevicesPath) delete all")
+                result = simctl(["--set", expandTilde(previewDevicesPath), "delete", "all"])
             }
             if !result.success {
                 Print.withColor(.yellow, "XCPGDevices deletion had issues (may already be empty)")
@@ -512,32 +517,20 @@ struct Clean: ParsableCommand {
     /// Silently ignores all errors (notifier unavailable, permission denied, etc.)
     /// since notifications are non-critical to the main task.
     private func sendNotification(message: String) {
-        let task = Process()
-        let pipe = Pipe()
-
-        task.standardOutput = pipe
-        task.standardError = pipe
-
         if let notifier = Self.terminalNotifierPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
             var arguments = ["-title", "avp", "-message", message, "-sound", "Glass"]
             if let terminalBundleID = ProcessInfo.processInfo.environment["__CFBundleIdentifier"] {
                 arguments += ["-activate", terminalBundleID]
             }
-            task.arguments = arguments
-            task.launchPath = notifier
+            runProcess(notifier, arguments)
         } else {
-            let script = "display notification \"\(message)\" with title \"avp\" sound name \"Glass\""
-            task.arguments = ["-e", script]
-            task.launchPath = "/usr/bin/osascript"
-        }
-
-        do {
-            try task.run()
-            task.waitUntilExit()
-            // Notification sent; ignore result (success or failure)
-        } catch {
-            // osascript not available or other error
-            // Silently continue; notification failure should not interrupt the user's task
+            // The message is passed as an argument to the script, never spliced into its source.
+            runProcess("/usr/bin/osascript", [
+                "-e", "on run argv",
+                "-e", "display notification (item 1 of argv) with title \"avp\" sound name \"Glass\"",
+                "-e", "end run",
+                message
+            ])
         }
     }
 
@@ -700,6 +693,31 @@ extension Clean {
             }
         }
 
+        /// Menu section, in display order: Xcode and iOS first.
+        enum Category: Int {
+            case xcodeIOS, developerTools, systemAndApps
+
+            var title: String {
+                switch self {
+                case .xcodeIOS: return "Xcode & iOS"
+                case .developerTools: return "Developer tools"
+                case .systemAndApps: return "System & apps"
+                }
+            }
+        }
+
+        var category: Category {
+            switch self {
+            case .noDerivedData, .derivedData, .archives, .previews, .documentationCache,
+                 .deviceSupport, .simulatorRuntimes, .simultorsData, .clonedSimulatorsData:
+                return .xcodeIOS
+            case .homebrewCache, .claudeJobsTmp, .maestroTests:
+                return .developerTools
+            case .trash, .largeSystemFolders, .messagesAttachments, .microsoftTeamsCache:
+                return .systemAndApps
+            }
+        }
+
         /// The user chooses items in a follow-up prompt, so the size shown is a ceiling.
         var picksItemsNext: Bool {
             self == .simultorsData || self == .deviceSupport || self == .simulatorRuntimes
@@ -845,21 +863,66 @@ extension Clean {
             }
         }
         
-        func shellCommand() throws -> String {
+        /// A program and its arguments, run without a shell. Paths are expanded here, not by a shell.
+        struct Command {
+            let executable: String
+            let arguments: [String]
+            var searchPath = systemSearchPath
+            /// The command is skipped when this folder doesn't exist (nothing to clean).
+            var requiredFolder: String?
+
+            var display: String { ([executable] + arguments).joined(separator: " ") }
+        }
+
+        private static let homebrewBinFolders = ["/opt/homebrew/bin", "/usr/local/bin"]
+
+        private static func remove(_ paths: String...) -> Command {
+            Command(executable: "/bin/rm", arguments: ["-rf"] + paths.map(expandTilde))
+        }
+
+        /// Deletes everything inside `folder`, keeping the folder itself.
+        static func emptyFolder(_ folder: String) -> Command {
+            Command(
+                executable: "/usr/bin/find",
+                arguments: [folder, "-mindepth", "1", "-maxdepth", "1", "-exec", "/bin/rm", "-rf", "{}", "+"],
+                requiredFolder: folder
+            )
+        }
+
+        /// Deletes `<jobs>/<job>/tmp` for every job.
+        static func removeJobTmpFolders(in jobs: String) -> Command {
+            Command(
+                executable: "/usr/bin/find",
+                arguments: [jobs, "-mindepth", "2", "-maxdepth", "2", "-name", "tmp", "-type", "d", "-exec", "/bin/rm", "-rf", "{}", "+"],
+                requiredFolder: jobs
+            )
+        }
+
+        func command() throws -> Command {
             switch self {
             case .noDerivedData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .simultorsData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .clonedSimulatorsData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
-            case .derivedData: return "rm -rf ~/Library/Developer/Xcode/DerivedData ~/Projects/InQBarna/Mango/DerivedData"
-            case .archives: return "rm -rf ~/Library/Developer/Xcode/Archives"
-            case .previews: return "rm -rf ~/Library/Developer/Xcode/UserData/Previews"
-            case .messagesAttachments: return  "open ~/Library/Messages/Attachments"
-            case .microsoftTeamsCache: return "rm -rf ~/Library/Application' 'Support/Microsoft/Teams"
-            case .documentationCache: return "rm -Rf ~/Library/Developer/Xcode/DocumentationCache"
-            case .trash: return "if [ -d ~/.Trash ]; then find ~/.Trash -mindepth 1 -maxdepth 1 -exec rm -rf {} +; fi"
-            case .homebrewCache: return "PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\" brew cleanup --prune=all"
-            case .maestroTests: return "rm -rf ~/.maestro/tests"
-            case .claudeJobsTmp: return "if [ -d ~/.claude/jobs ]; then find ~/.claude/jobs -mindepth 2 -maxdepth 2 -name tmp -type d -exec rm -rf {} +; fi"
+            case .derivedData: return Self.remove("~/Library/Developer/Xcode/DerivedData", "~/Projects/InQBarna/Mango/DerivedData")
+            case .archives: return Self.remove("~/Library/Developer/Xcode/Archives")
+            case .previews: return Self.remove("~/Library/Developer/Xcode/UserData/Previews")
+            case .messagesAttachments: return Command(executable: "/usr/bin/open", arguments: [expandTilde("~/Library/Messages/Attachments")])
+            case .microsoftTeamsCache: return Self.remove("~/Library/Application Support/Microsoft/Teams")
+            case .documentationCache: return Self.remove("~/Library/Developer/Xcode/DocumentationCache")
+            case .trash: return Self.emptyFolder(expandTilde("~/.Trash"))
+            case .homebrewCache:
+                guard let folder = Self.homebrewBinFolders.first(where: {
+                    FileManager.default.isExecutableFile(atPath: $0 + "/brew")
+                }) else {
+                    throw "Homebrew not found in \(Self.homebrewBinFolders.joined(separator: " or "))"
+                }
+                return Command(
+                    executable: folder + "/brew",
+                    arguments: ["cleanup", "--prune=all"],
+                    searchPath: (Self.homebrewBinFolders + [systemSearchPath]).joined(separator: ":")
+                )
+            case .maestroTests: return Self.remove("~/.maestro/tests")
+            case .claudeJobsTmp: return Self.removeJobTmpFolders(in: expandTilde(Self.claudeJobsPath))
             case .deviceSupport: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .simulatorRuntimes: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .largeSystemFolders: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
@@ -876,7 +939,7 @@ private extension Clean {
         let row: CheckboxTableRow
     }
 
-    /// The visible options as table rows, biggest first (ties keep menu order).
+    /// The visible options as menu rows, grouped by category and biggest first within each.
     func menuEntries() -> [MenuEntry] {
         let estimatesByPath = diskUsageEstimatesByPath()
         let runtimesBytes = SimulatorRuntimes.list().reduce(0) { $0 + $1.sizeBytes }
@@ -901,6 +964,7 @@ private extension Clean {
 
             return MenuEntry(input: optionInput, row: CheckboxTableRow(
                 name: optionInput.tableName,
+                group: optionInput.category.title,
                 bytes: bytes,
                 size: size,
                 risk: optionInput.risk,
@@ -915,8 +979,14 @@ private extension Clean {
             ))
         }
 
+        // By category (Xcode & iOS first), then biggest first; ties keep menu order.
         return entries.enumerated()
-            .sorted { ($0.element.row.bytes, $1.offset) > ($1.element.row.bytes, $0.offset) }
+            .sorted { lhs, rhs in
+                let (a, b) = (lhs.element, rhs.element)
+                if a.input.category != b.input.category { return a.input.category.rawValue < b.input.category.rawValue }
+                if a.row.bytes != b.row.bytes { return a.row.bytes > b.row.bytes }
+                return lhs.offset < rhs.offset
+            }
             .map { $0.element }
     }
 

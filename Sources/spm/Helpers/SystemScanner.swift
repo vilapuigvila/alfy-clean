@@ -10,26 +10,39 @@ struct SystemScanner {
     /// Scans system folders for directories larger than 5GB, removes parent folders, and returns formatted output.
     /// Returns empty string if scan fails.
     static func listLargeFolders() -> String {
-        let command = buildScanCommand()
-        let task = Process()
-        let pipe = Pipe()
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+        // du exits non-zero when it can't read a folder, but still prints every size it did get.
+        let du = runProcess(
+            "/usr/bin/du",
+            ["-k", "/Applications", "/Library", home + "/Library", "/private", "/opt", "/usr/local"],
+            errorOutput: .discarded
+        )
+        guard !du.output.isEmpty else { return "" }
 
-        task.standardOutput = pipe
-        task.standardError = pipe
-        task.arguments = ["-c", command]
-        task.launchPath = "/bin/zsh"
+        let awk = runProcess(
+            "/usr/bin/awk",
+            ["-v", "excluded=\(excludedPaths.joined(separator: "|"))", awkProgram],
+            input: Data(du.output.utf8),
+            errorOutput: .discarded
+        )
+        guard awk.success else { return "" }
 
-        do {
-            try task.run()
-            task.waitUntilExit()
+        // Biggest first, top 50, formatted as "  12.2 GB  /path".
+        let largest: [(kilobytes: UInt64, path: String)] = awk.output
+            .split(separator: "\n")
+            .compactMap { line in
+                let parts = line.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+                guard parts.count == 2, let kilobytes = UInt64(parts[0]) else { return nil }
+                return (kilobytes, String(parts[1]))
+            }
+            .sorted { $0.kilobytes > $1.kilobytes }
+            .prefix(50)
+            .map { $0 }
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-
-            return output.trimmingCharacters(in: .whitespacesAndNewlines)
-        } catch {
-            return ""
-        }
+        return largest
+            .map { String(format: "  %.1f GB  %@", Double($0.kilobytes) * 1024 / 1_000_000_000, $0.path) }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Folders left out of the scan. Their size is subtracted from every parent that contains them,
@@ -42,14 +55,11 @@ struct SystemScanner {
         "/Applications/Xcode.app/Contents",
     ]
 
-    /// Builds shell command to scan folders, deduplicate parents, and format output.
-    /// The awk script drops excluded folders, subtracts their size from parents, and filters out parent folders
-    /// when a child folder > 5GB exists in the result set.
-    /// Results are sorted by size descending and limited to top 50.
-    private static func buildScanCommand() -> String {
-        """
-        /usr/bin/du -k /Applications /Library "$HOME/Library" /private /opt /usr/local 2>/dev/null | \
-        /usr/bin/awk -v excluded="\(excludedPaths.joined(separator: "|"))" 'BEGIN { FS="\\t"; OFS=" "; n = split(excluded, ex, "|") } {
+    /// awk script run over `du -k` output: drops excluded folders, subtracts their size from parents, and
+    /// filters out parent folders when a child folder > 5GB exists in the result set. Prints "<kilobytes> <path>".
+    /// Sorting and the top-50 cut happen in Swift (see `listLargeFolders`).
+    private static let awkProgram = """
+          BEGIN { FS="\\t"; OFS=" "; n = split(excluded, ex, "|") } {
           if (NF == 2) {
             path = $2
           } else {
@@ -95,12 +105,8 @@ struct SystemScanner {
             }
             if (!is_parent) print keptSize[i] " " keptPath[i]
           }
-        }' | \
-        /usr/bin/sort -rn | \
-        /usr/bin/head -50 | \
-        /usr/bin/awk '{ size=$1; $1=""; sub(/^ /, ""); printf "  %.1f GB  %s\\n", size * 1024 / 1000000000, $0 }'
-        """
-    }
+        }
+    """
 }
 
 // MARK: Safe-to-delete candidates -

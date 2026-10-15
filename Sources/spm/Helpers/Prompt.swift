@@ -223,7 +223,7 @@ final class Prompt {
         checkboxOptions(
             Array(rows.indices),
             question: question,
-            label: { "\(rows[$0].name)  \(rows[$0].size)  \(rows[$0].risk.tag)" },
+            label: { "\(rows[$0].name)  \(rows[$0].size)  \(rows[$0].risk.label)" },
             detail: { rows[$0].summary }
         )
     }

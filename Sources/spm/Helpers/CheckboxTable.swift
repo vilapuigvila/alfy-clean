@@ -1,7 +1,8 @@
 //
 //  CheckboxTable.swift
 //
-//  Rows and layout for the size-ranked cleanup menu (`Prompt.checkboxTable`).
+//  Rows and layout for the cleanup menu (`Prompt.checkboxTable`): a list on the left and an inspector
+//  for the focused row on the right.
 //
 
 import Foundation
@@ -10,14 +11,24 @@ struct CheckboxTableRow {
     enum Risk {
         case bulk, safe, pick, slow, final, look
 
-        var tag: String {
+        /// One glyph for the list. Shapes differ, so the risk doesn't rely on color alone.
+        var dot: String {
             switch self {
-            case .bulk: return "bulk"
-            case .safe: return "safe"
-            case .pick: return "pick"
-            case .slow: return "slow"
-            case .final: return "final"
-            case .look: return "look"
+            case .safe: return "●"
+            case .bulk, .pick: return "◆"
+            case .final, .slow: return "▲"
+            case .look: return "○"
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .bulk: return "Bulk · runs several cleanups"
+            case .safe: return "Safe · rebuilds itself"
+            case .pick: return "Pick which · you choose items next"
+            case .slow: return "Careful · signs you out"
+            case .final: return "Can't undo · gone for good"
+            case .look: return "Look only · deletes nothing by itself"
             }
         }
 
@@ -33,9 +44,11 @@ struct CheckboxTableRow {
     }
 
     var name: String
-    /// What choosing the row frees, for the bar and the running total.
+    /// Section heading shown above the first row of each run of rows with the same group.
+    var group = ""
+    /// What choosing the row frees, for the running total.
     var bytes: UInt64
-    /// Text for the "Frees" column, e.g. "62.2 GB", "~0 MB" or "scan".
+    /// Text for the size column, e.g. "62.2 GB", "~0 MB" or "scan".
     var size: String
     var risk: Risk
     /// The size is partly estimated: the total shows "~".
@@ -46,21 +59,28 @@ struct CheckboxTableRow {
     var facts: [(label: String, value: String)]
 }
 
-/// Draws one frame of the table: question, hint, rows, detail box for the focused row, and the total.
-/// If the full frame is taller than the terminal it drops the storage frame and shrinks the detail box,
-/// because the redraw moves the cursor up by the frame's line count.
+/// Draws one frame: question, hint, the list (left) beside the inspector for the focused row (right), and the total.
+/// On a narrow terminal the inspector goes under the list. If the frame is taller than the terminal it drops the
+/// storage banner, then the section headings, and shrinks the inspector, because the redraw moves the cursor up
+/// by the frame's line count.
 struct CheckboxTableLayout {
     let rows: [CheckboxTableRow]
     let question: String?
     let size: (rows: Int, columns: Int)
 
-    private enum BoxStyle { case full, compact, line }
-    private typealias Level = (fullQuestion: Bool, box: BoxStyle)
-    private static let levels: [Level] = [(true, .full), (true, .compact), (false, .compact), (false, .line)]
+    private enum InspectorStyle { case roomy, compact, minimal }
+    private typealias Level = (fullQuestion: Bool, headings: Bool, inspector: InspectorStyle)
+    private static let levels: [Level] = [
+        (true, true, .roomy), (false, true, .roomy), (false, true, .compact), (false, false, .compact), (false, false, .minimal)
+    ]
 
     private typealias C = Print.Color
-    private let tagWidth = 5
-    private let factLabelWidth = 11
+    private typealias Cell = (text: String, visible: Int)
+
+    private let listWidth = 44
+    private let separator = " │ "
+    /// Below this width the inspector is stacked under the list instead of beside it.
+    private let sideBySideMinimum = 88
 
     func lines(focused: Int, selected: Set<Int>) -> [String] {
         var frame: [String] = []
@@ -74,8 +94,8 @@ struct CheckboxTableLayout {
     // MARK: Frame
 
     private func build(_ level: Level, focused: Int, selected: Set<Int>) -> [String] {
-        let width = max(min(size.columns, 100) - 1, 40)
-        let columns = Columns(rows: rows, width: width, tagWidth: tagWidth)
+        let width = max(min(size.columns, 120) - 1, 40)
+        let sideBySide = width >= sideBySideMinimum
         var out: [String] = []
 
         if let question = question {
@@ -88,111 +108,109 @@ struct CheckboxTableLayout {
         }
         out.append(dim("↑/↓ move  •  space select  •  enter confirm  •  q cancel"))
         if level.fullQuestion { out.append("") }
-        out.append(dim(header(columns)))
-        for index in rows.indices {
-            out.append(rowLine(index, focused: index == focused, selected: selected.contains(index), columns))
-        }
 
+        let list = listCells(focused: focused, selected: selected, showHeadings: level.headings)
         let row = rows[focused]
-        switch level.box {
-        case .full:
+
+        if sideBySide {
+            let inspectorWidth = width - listWidth - separator.count
+            let inspector = inspectorLines(row, width: inspectorWidth, style: level.inspector)
+            for index in 0..<max(list.count, inspector.count) {
+                let left: Cell = index < list.count ? list[index] : ("", 0)
+                let padding = String(repeating: " ", count: listWidth - left.visible)
+                let right = index < inspector.count ? inspector[index] : ""
+                out.append(left.text + padding + dim(separator) + right)
+            }
+        } else {
+            out += list.map { $0.text }
             out.append("")
-            out += box(row, width: width, withFacts: true)
-        case .compact:
-            out += box(row, width: width, withFacts: false)
-        case .line:
-            out.append(dim("  " + fit(row.summary, width - 2)))
+            out += inspectorLines(row, width: width - 2, style: level.inspector == .minimal ? .minimal : .compact).map { "  " + $0 }
         }
 
         out.append(footer(selected, width: width))
         return out
     }
 
-    private struct Columns {
-        let nameWidth: Int
-        let barWidth: Int
-        let sizeWidth: Int
+    // MARK: List
 
-        init(rows: [CheckboxTableRow], width: Int, tagWidth: Int) {
-            sizeWidth = max(rows.map { $0.size.count }.max() ?? 0, "FREES".count)
-            let longestName = rows.map { $0.name.count }.max() ?? 0
-            let fixed = 4 + 2 + sizeWidth + 2 + tagWidth     // "❯ ☐ " + gaps + size + tag
-            let withBar = min(longestName, width - fixed - 2 - 16)
-            if withBar >= 14 {
-                nameWidth = withBar
-                barWidth = 16
-            } else {
-                nameWidth = max(min(longestName, width - fixed), 8)
-                barWidth = 0
+    private func listCells(focused: Int, selected: Set<Int>, showHeadings: Bool) -> [Cell] {
+        let sizeWidth = max(rows.map { $0.size.count }.max() ?? 0, 6)
+        let nameWidth = listWidth - 4 - 2 - sizeWidth - 2 - 1     // "❯ ☐ " + gap + size + gap + dot
+        var cells: [Cell] = []
+
+        for index in rows.indices {
+            let row = rows[index]
+            if showHeadings, !row.group.isEmpty, index == 0 || row.group != rows[index - 1].group {
+                cells.append(heading(row.group))
             }
+
+            let isFocused = index == focused
+            let isSelected = selected.contains(index)
+            let cursor = isFocused ? paint("❯", .boldGreen) : " "
+            let checkbox = isSelected ? paint("☑", .green) : "☐"
+            let name = padRight(fit(row.name, nameWidth), nameWidth)
+            let shownName = isFocused ? paint(name, .boldGreen) : (isSelected ? paint(name, .green) : name)
+            let text = "\(cursor) \(checkbox) \(shownName)  \(padLeft(row.size, sizeWidth))  \(paint(row.risk.dot, row.risk.color))"
+            cells.append((text, listWidth))
         }
+        return cells
     }
 
-    private func header(_ columns: Columns) -> String {
-        var line = "    " + padRight("FOLDER", columns.nameWidth)
-        if columns.barWidth > 0 { line += "  " + padRight("RELATIVE SIZE", columns.barWidth) }
-        return line + "  " + padLeft("FREES", columns.sizeWidth) + "  RISK"
+    private func heading(_ title: String) -> Cell {
+        let rule = String(repeating: "─", count: max(listWidth - title.count - 3, 2))
+        return ("  " + paint(title, .cyan) + " " + dim(rule), 2 + title.count + 1 + rule.count)
     }
 
-    private func rowLine(_ index: Int, focused: Bool, selected: Bool, _ columns: Columns) -> String {
-        let row = rows[index]
-        let cursor = focused ? paint("❯", .boldGreen) : " "
-        let checkbox = selected ? paint("☑", .green) : "☐"
-        let name = padRight(fit(row.name, columns.nameWidth), columns.nameWidth)
-        let shownName = focused ? paint(name, .boldGreen) : (selected ? paint(name, .green) : name)
+    // MARK: Inspector
 
-        var line = "\(cursor) \(checkbox) \(shownName)"
-        if columns.barWidth > 0 { line += "  " + bar(row, width: columns.barWidth) }
-        line += "  " + padLeft(row.size, columns.sizeWidth)
-        line += "  " + paint(padRight(row.risk.tag, tagWidth), row.risk.color)
-        return line
-    }
+    /// The focused row: name, size, risk, what it does and the facts.
+    /// `roomy` adds blank lines and small headings, `compact` puts each fact on one line,
+    /// `minimal` is just name and size, the risk and one line of what it does.
+    private func inspectorLines(_ row: CheckboxTableRow, width: Int, style: InspectorStyle) -> [String] {
+        var out: [String] = []
 
-    private func bar(_ row: CheckboxTableRow, width: Int) -> String {
-        let largest = rows.map { $0.bytes }.max() ?? 0
-        var filled = 0
-        if row.bytes > 0, largest > 0 {
-            filled = max(1, Int((Double(row.bytes) / Double(largest) * Double(width)).rounded()))
+        if style == .minimal {
+            let size = row.size
+            out.append(paint(fit(row.name, max(width - size.count - 2, 1)), .bold) + "  " + dim(size))
+            out.append(paint("\(row.risk.dot) \(row.risk.label)", row.risk.color))
+            out += wrap(row.summary, width: width, maxLines: 1)
+            return out
         }
-        return paint(String(repeating: "█", count: filled), .cyan)
-            + dim(String(repeating: "░", count: width - filled))
-    }
 
-    private func box(_ row: CheckboxTableRow, width: Int, withFacts: Bool) -> [String] {
-        let inner = width - 4
-        var content: [(text: String, visible: Int)] = []
+        out.append(dim(fit(row.name, width)))
+        out.append(paint(fit(row.size, width), .bold))
+        out.append(paint("\(row.risk.dot) \(row.risk.label)", row.risk.color))
 
-        let title = fit(row.name, inner)
-        content.append((paint(title, .boldGreen), title.count))
-
-        let summaryLines = wrap(row.summary, width: inner, maxLines: withFacts ? 2 : 1)
-        for line in summaryLines { content.append((line, line.count)) }
-        if withFacts {
-            // Constant height: pad a one-line summary so the box doesn't jump between rows.
-            for _ in summaryLines.count..<2 { content.append(("", 0)) }
+        if style == .roomy {
+            out.append("")
+            out.append(dim("WHAT IT DOES"))
+            out += wrap(row.summary, width: width, maxLines: 3)
             for fact in row.facts {
-                let label = padRight(fact.label, factLabelWidth)
-                let value = fit(fact.value, max(inner - factLabelWidth, 1))
-                content.append((dim(label) + value, label.count + value.count))
+                out.append("")
+                out.append(dim(fact.label.uppercased()))
+                out += wrap(fact.value, width: width, maxLines: 2)
+            }
+        } else {
+            out += wrap(row.summary, width: width, maxLines: 2)
+            let labelWidth = 11
+            for fact in row.facts {
+                let value = fit(fact.value, max(width - labelWidth, 1))
+                out.append(dim(padRight(fact.label, labelWidth)) + value)
             }
         }
-
-        let rule = String(repeating: "─", count: width - 2)
-        var out = ["╭\(rule)╮"]
-        for line in content {
-            out.append("│ \(line.text)\(String(repeating: " ", count: max(inner - line.visible, 0))) │")
-        }
-        out.append("╰\(rule)╯")
         return out
     }
+
+    // MARK: Footer
 
     private func footer(_ selected: Set<Int>, width: Int) -> String {
         let chosen = selected.sorted().map { rows[$0] }
         guard !chosen.isEmpty else { return dim("Nothing selected") }
 
         let prefix = chosen.contains { $0.isUpperBound } ? "up to " : (chosen.contains { $0.isApproximate } ? "~" : "")
-        let left = "\(chosen.count) selected"
         let right = "will free \(prefix)\(DiskUsage.format(chosen.reduce(0) { $0 + $1.bytes }))"
+        let names = chosen.map { $0.name }.joined(separator: ", ")
+        let left = fit("\(chosen.count) selected: \(names)", max(width - right.count - 2, 10))
         let gap = String(repeating: " ", count: max(width - left.count - right.count, 2))
         return left + gap + paint(right, .green)
     }

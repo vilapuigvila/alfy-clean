@@ -32,9 +32,9 @@ its `CommandConfiguration.subcommands` array and calls `Avp.main()`.
   - `Clean` — deletes DerivedData, archives, simulator data, keychains, etc. via shell `rm`. Options are indexed by the `OptionInput` enum; `isHiddenInMenu` options (all-except-DerivedData, Maestro, Teams, Messages) stay in the code and in `-d <n>` / `all` but aren't offered in the menu; `Clean.run()` maps a numeric input (arg or interactive prompt) to an action.
   - `XcodeBuild` — **defined but NOT registered** in `main.swift`; its `run()` is a no-op stub. Wire it into the `subcommands` array to activate it.
 - **Helpers** (`Sources/spm/Helpers/`):
-  - `Global.swift` — `shell(_:)` runs a command through `/bin/zsh -c` and returns stdout+stderr; `keyboardInput()` reads a line.
+  - `Global.swift` — `runProcess(_:_:)` runs an absolute-path executable with an argument array (no shell, fixed `PATH`) and returns stdout+stderr; `simctl(_:)` and `expandTilde(_:)` wrap the common cases; `keyboardInput()` reads a line.
   - `Print.swift` — ANSI-colored output (`Print.withColor`, `.h3`, `.h6`).
-  - `CheckboxTable.swift` — rows and layout of the `avp clean` menu (size-ranked table, detail box for the focused row, running total); `Prompt.checkboxTable` drives it and shrinks the frame when the terminal is short.
+  - `CheckboxTable.swift` — rows and layout of the `avp clean` menu: a list on the left (sections Xcode & iOS / Developer tools / System & apps, biggest first inside each, a risk glyph per row) beside an inspector for the focused row (size, risk, what it does, deletes, comes back, asks first), plus a running total. `Prompt.checkboxTable` drives it; on a narrow terminal the inspector goes under the list, and on a short one the layout drops the storage banner, the section headings and then inspector detail.
   - `Prompt.swift` — interactive `ask`/`yesNo`/`options`. Its I/O goes through `customPrint`/`customReadline`, which can be swapped in tests via the global `TestablePrintFunction`/`TestableReadLineFunction` hooks.
   - `AVPTimer.swift` — CFRunLoop-based repeating "Wait…" spinner.
 - **Extensions** (`Sources/spm/Extensions/`):

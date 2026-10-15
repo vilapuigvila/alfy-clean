@@ -40,7 +40,7 @@ struct SimulatorRuntime: Decodable {
 struct SimulatorRuntimes {
     /// Deletable runtimes, sorted by version (oldest first). Empty if `simctl` fails.
     static func list() -> [SimulatorRuntime] {
-        let result = shell("xcrun simctl runtime list -j 2>/dev/null")
+        let result = simctl(["runtime", "list", "-j"], errorOutput: .discarded)
         guard result.success,
               let data = result.output.data(using: .utf8),
               let runtimes = try? JSONDecoder().decode([String: SimulatorRuntime].self, from: data) else {
@@ -53,6 +53,6 @@ struct SimulatorRuntimes {
     }
 
     static func delete(_ runtime: SimulatorRuntime) -> ShellResult {
-        shell("xcrun simctl runtime delete \(runtime.identifier)")
+        simctl(["runtime", "delete", runtime.identifier])
     }
 }
