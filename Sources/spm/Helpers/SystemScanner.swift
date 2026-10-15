@@ -32,49 +32,68 @@ struct SystemScanner {
         }
     }
 
+    /// Folders left out of the scan. Their size is subtracted from every parent that contains them,
+    /// so a parent like /Library/Developer/CoreSimulator doesn't keep showing the excluded bytes.
+    static let excludedPaths = [
+        "/Library/Developer/CoreSimulator/Volumes",
+        "/Library/Developer/CoreSimulator/Cryptex",
+        "/Library/Developer/CoreSimulator/Caches/dyld",
+        "/private/var",
+        "/Applications/Xcode.app/Contents",
+    ]
+
     /// Builds shell command to scan folders, deduplicate parents, and format output.
-    /// The awk script filters out parent folders when a child folder > 5GB exists in the result set.
+    /// The awk script drops excluded folders, subtracts their size from parents, and filters out parent folders
+    /// when a child folder > 5GB exists in the result set.
     /// Results are sorted by size descending and limited to top 50.
     private static func buildScanCommand() -> String {
         """
-        /usr/bin/du -k /Applications /Library /System "$HOME/Library" /private /opt /usr/local 2>/dev/null | \
-        /usr/bin/awk 'BEGIN { FS="\\t"; OFS=" " } $1 >= 4882813 {
+        /usr/bin/du -k /Applications /Library "$HOME/Library" /private /opt /usr/local 2>/dev/null | \
+        /usr/bin/awk -v excluded="\(excludedPaths.joined(separator: "|"))" 'BEGIN { FS="\\t"; OFS=" "; n = split(excluded, ex, "|") } {
           if (NF == 2) {
-            paths[NR] = $2
+            path = $2
           } else {
             path = $0; sub(/^[0-9]+[[:space:]]+/, "", path)
-            paths[NR] = path
           }
           # /System/Volumes/Data/X is the same data as /X (firmlinks): report it once, as /X.
           # The volume root itself is the whole data disk, never a useful result.
-          if (paths[NR] == "/System/Volumes/Data") {
-            delete paths[NR]
-            next
+          if (path == "/System/Volumes/Data") next
+          if (index(path, "/System/Volumes/Data/") == 1) {
+            path = substr(path, 21)
           }
-          if (index(paths[NR], "/System/Volumes/Data/") == 1) {
-            paths[NR] = substr(paths[NR], 21)
+          if (path in seen) next
+          seen[path] = 1
+          # Excluded folders (and everything inside them) are dropped; their own size is kept for the parents.
+          skip = 0
+          for (i = 1; i <= n; i++) {
+            if (path == ex[i]) excludedSize[path] = $1
+            if (path == ex[i] || index(path, ex[i] "/") == 1) { skip = 1; break }
           }
-          if (paths[NR] in seen) {
-            delete paths[NR]
-            next
-          }
-          seen[paths[NR]] = 1
-          sizes[NR] = $1
+          if (skip) next
+          count++
+          paths[count] = path
+          sizes[count] = $1
         }
         END {
-          for (i in paths) {
+          for (k = 1; k <= count; k++) {
+            size = sizes[k] + 0
+            for (e in excludedSize) {
+              if (index(e, paths[k] "/") == 1) size -= excludedSize[e]
+            }
+            if (size < 4882813) continue
+            kept++
+            keptPath[kept] = paths[k]
+            keptSize[kept] = size
+          }
+          for (i = 1; i <= kept; i++) {
             is_parent = 0
-            for (j in paths) {
-              if (i != j) {
-                if (substr(paths[j], 1, length(paths[i])+1) == paths[i] "/") {
-                  is_parent = 1
-                  break
-                }
+            for (j = 1; j <= kept; j++) {
+              if (i != j && substr(keptPath[j], 1, length(keptPath[i])+1) == keptPath[i] "/") {
+                is_parent = 1
+                break
               }
             }
-            if (!is_parent) {
-              print sizes[i] " " paths[i]
-            }
+            if (!is_parent) print keptSize[i] " " keptPath[i]
           }
         }' | \
         /usr/bin/sort -rn | \
