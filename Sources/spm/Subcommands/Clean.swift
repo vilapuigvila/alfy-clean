@@ -623,10 +623,7 @@ extension Clean {
                     "~/.maestro/tests"
                 ]
             case .simultorsData:
-                return [
-                    "~/Library/Developer/CoreSimulator/Devices",
-                    "~/Library/Developer/CoreSimulator/Caches"
-                ]
+                return ["~/Library/Developer/CoreSimulator/Devices"]
             case .clonedSimulatorsData:
                 return [
                     "~/Library/Developer/XCTestDevices",
