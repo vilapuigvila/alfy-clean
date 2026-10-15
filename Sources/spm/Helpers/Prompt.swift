@@ -151,11 +151,12 @@ final class Prompt {
     public func checkboxOptions<T>(
         _ options: [T],
         question: String? = nil,
-        label: (T) -> String = { "\($0)" }
+        label: (T) -> String = { "\($0)" },
+        detail: ((T) -> String?)? = nil
     ) -> [T] {
         guard !options.isEmpty else { return [] }
         guard isatty(STDIN_FILENO) != 0 else {
-            return lineInputCheckboxOptions(options, question: question, label: label)
+            return lineInputCheckboxOptions(options, question: question, label: label, detail: detail)
         }
 
         var selectedIndexes = Set<Int>()
@@ -163,7 +164,7 @@ final class Prompt {
         var renderedLineCount = 0
 
         guard let rawMode = TerminalRawMode() else {
-            return lineInputCheckboxOptions(options, question: question, label: label)
+            return lineInputCheckboxOptions(options, question: question, label: label, detail: detail)
         }
         defer {
             rawMode.restore()
@@ -185,6 +186,13 @@ final class Prompt {
             lines.append("\(Print.Color.dim.rawValue)↑/↓ move  •  space select  •  enter confirm  •  q cancel\(Print.Color.reset.rawValue)")
             lines.append("")
 
+            // A description under every row, unless that would scroll the menu off the screen
+            // (the redraw moves the cursor up by line count, so it must fit).
+            let size = terminalSize()
+            let headerLines = lines.count
+            let fitsWithDetails = detail != nil && headerLines + options.count * 2 < size.rows
+            let detailIndent = "      "
+
             for index in options.indices {
                 let isFocused = index == focusedIndex
                 let isSelected = selectedIndexes.contains(index)
@@ -198,6 +206,12 @@ final class Prompt {
                     lines.append("\(Print.Color.green.rawValue)\(line)\(Print.Color.reset.rawValue)")
                 } else {
                     lines.append(line)
+                }
+
+                if let text = detail?(options[index]), fitsWithDetails || isFocused {
+                    let room = max(size.columns - detailIndent.count - 1, 10)
+                    let shown = text.count > room ? String(text.prefix(room - 1)) + "…" : text
+                    lines.append("\(Print.Color.dim.rawValue)\(detailIndent)\(shown)\(Print.Color.reset.rawValue)")
                 }
             }
 
@@ -243,7 +257,8 @@ final class Prompt {
     private func lineInputCheckboxOptions<T>(
         _ options: [T],
         question: String?,
-        label: (T) -> String
+        label: (T) -> String,
+        detail: ((T) -> String?)? = nil
     ) -> [T] {
         while true {
             if let question = question {
@@ -252,6 +267,9 @@ final class Prompt {
 
             for index in options.indices {
                 customPrint("  [\(index)] ☐ \(label(options[index]))")
+                if let text = detail?(options[index]) {
+                    customPrint("\(Print.Color.dim.rawValue)        \(text)\(Print.Color.reset.rawValue)")
+                }
             }
             customPrint("")
             customPrint("Choose one or more options separated by commas", terminator: " › ")
@@ -355,6 +373,15 @@ private func readTerminalKey() -> TerminalKey {
     default:
         return .character(byte)
     }
+}
+
+/// Terminal size, with a safe default when it can't be read.
+private func terminalSize() -> (rows: Int, columns: Int) {
+    var size = winsize()
+    guard ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0, size.ws_row > 0, size.ws_col > 0 else {
+        return (24, 80)
+    }
+    return (Int(size.ws_row), Int(size.ws_col))
 }
 
 private func writeTerminal(_ string: String) {

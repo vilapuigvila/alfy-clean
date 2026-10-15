@@ -5,10 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 `avp` is a personal macOS command-line helper (Swift Package Manager executable) for
-Apple/iOS development chores: cleaning Xcode & simulator caches, listing developer-folder
-disk usage, and sending APNs push notifications. Built on
-[swift-argument-parser](https://github.com/apple/swift-argument-parser) and
-[Swift-JWT](https://github.com/Kitura/Swift-JWT). Requires macOS 12+, swift-tools 5.5.
+Apple/iOS development chores: cleaning Xcode & simulator caches, and listing developer-folder
+disk usage. Built on
+[swift-argument-parser](https://github.com/apple/swift-argument-parser). Requires macOS 12+, swift-tools 5.5.
 
 ## Commands
 
@@ -31,7 +30,6 @@ its `CommandConfiguration.subcommands` array and calls `Avp.main()`.
 - **Subcommands** (`Sources/spm/Subcommands/`) — each is a `ParsableCommand` struct/class:
   - `Cache` — lists disk usage (`du -hs`) of Xcode/developer folders; has a nested `List` subcommand.
   - `Clean` — deletes DerivedData, archives, simulator data, keychains, etc. via shell `rm`. Options are indexed by the `OptionInput` enum; `Clean.run()` maps a numeric input (arg or interactive prompt) to an action.
-  - `Pusher` — sends APNs pushes. Builds an ES256 JWT from a `.p8` key, caches the bearer token in `UserDefaults` (`authTokenKey`), and refreshes it when expired. Uses a semaphore + `RunLoop` to bridge the async `URLSession` call into the synchronous `run()`.
   - `XcodeBuild` — **defined but NOT registered** in `main.swift`; its `run()` is a no-op stub. Wire it into the `subcommands` array to activate it.
 - **Helpers** (`Sources/spm/Helpers/`):
   - `Global.swift` — `shell(_:)` runs a command through `/bin/zsh -c` and returns stdout+stderr; `keyboardInput()` reads a line.
@@ -39,12 +37,11 @@ its `CommandConfiguration.subcommands` array and calls `Avp.main()`.
   - `Prompt.swift` — interactive `ask`/`yesNo`/`options`. Its I/O goes through `customPrint`/`customReadline`, which can be swapped in tests via the global `TestablePrintFunction`/`TestableReadLineFunction` hooks.
   - `AVPTimer.swift` — CFRunLoop-based repeating "Wait…" spinner.
 - **Extensions** (`Sources/spm/Extensions/`):
-  - `String+JWT.swift` — decodes a JWT payload and exposes `jwtExpirationDate`. Also declares `extension String: Error {}`, so **string literals can be `throw`n directly** throughout the codebase (e.g. `throw "message"`).
+  - `String+Error.swift` — declares `extension String: Error {}`, so **string literals can be `throw`n directly** throughout the codebase (e.g. `throw "message"`).
   - `URL+FileManager.swift` — `subDirectories()` enumeration used by `Clean`.
 
 ## Conventions & gotchas
 
 - **Adding a subcommand**: create a `ParsableCommand` in `Sources/spm/Subcommands/`, then add it to the `subcommands:` array in `main.swift`. It won't appear in the CLI otherwise.
 - **Version bumps**: `Constant.App.version` in `main.swift` is asserted verbatim by `testExample` (checks `"avp version <x>\n"` from `--version`). Update the test when bumping.
-- **`Pusher` is hardcoded to one environment**: sandbox APNs endpoint, `apns-topic`, team/key IDs, a `.p8` path under `~/Desktop`, and default device tokens are all literals in `Pusher.swift`. Treat these as personal config, not general-purpose parameters.
 - `buildWithTimingSummary.sh` under `Resources/Scripts/` is `exclude`d from the build target — it's a standalone reference script, not compiled or bundled.

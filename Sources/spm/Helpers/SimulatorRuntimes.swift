@@ -28,7 +28,7 @@ struct SimulatorRuntime: Decodable {
         case "xr": displayPlatform = "visionOS"
         default: displayPlatform = platform
         }
-        return "\(displayPlatform) \(version) (\(build))"
+        return "\(displayPlatform) \(version) (\(build))".terminalSafe
     }
 
     /// e.g. "2026-09-28"

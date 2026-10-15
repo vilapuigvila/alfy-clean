@@ -111,6 +111,8 @@ extension SystemScanner {
         let gigabytes: Double
         /// Shown next to the folder in the delete checklist.
         let note: String
+
+        var displayPath: String { path.terminalSafe }
     }
 
     /// Parses `listLargeFolders()` output ("  12.2 GB  /path") and keeps only folders that are safe to
@@ -120,9 +122,33 @@ extension SystemScanner {
             let parts = line.trimmingCharacters(in: .whitespaces).components(separatedBy: " GB  ")
             guard parts.count == 2, let gigabytes = Double(parts[0]) else { return nil }
             let path = parts[1]
-            guard let note = safeDeleteNote(for: path) else { return nil }
+            guard let note = safeDeleteNote(for: path), isUnchangedOnDisk(path) else { return nil }
             return LargeFolder(path: path, gigabytes: gigabytes, note: note)
         }
+    }
+
+    /// The final check right before deleting: on the allowlist, and still the same real folder on disk.
+    static func isSafeToDeleteNow(_ path: String) -> Bool {
+        safeDeleteNote(for: path) != nil && isUnchangedOnDisk(path)
+    }
+
+    /// `removeItem` follows symlinks in the middle of a path, so a folder swapped for a link after the scan
+    /// would redirect the delete. Require that no component is a symlink (the resolved path is the path
+    /// itself), and that the Claude temp root is ours and private, so no other user can swap anything in it.
+    private static func isUnchangedOnDisk(_ path: String) -> Bool {
+        guard let resolved = realpath(path, nil) else { return false }
+        defer { free(resolved) }
+        guard String(cString: resolved) == path else { return false }
+
+        let claudeTemp = "/private/tmp/claude-\(getuid())"
+        if path.hasPrefix(claudeTemp + "/") {
+            var info = stat()
+            guard lstat(claudeTemp, &info) == 0,
+                  info.st_uid == getuid(),
+                  info.st_mode & S_IFMT == S_IFDIR,
+                  info.st_mode & (S_IWGRP | S_IWOTH) == 0 else { return false }
+        }
+        return true
     }
 
     /// Returns why `path` is safe to delete, or `nil` when it isn't on the allowlist.

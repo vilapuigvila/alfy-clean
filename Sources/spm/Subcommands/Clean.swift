@@ -50,8 +50,9 @@ struct Clean: ParsableCommand {
             return
         }
 
-        if shouldConfirmDelete(for: optionInputs) {
-            let confirmDelete = Prompt().yesNo("⚠️  This will delete simulator data, archives, or build cache. Continue?")
+        let needConfirmation = optionInputs.filter { $0.needsConfirmation }
+        if !needConfirmation.isEmpty {
+            let confirmDelete = Prompt().yesNo("⚠️  This permanently deletes:\n\(bulleted(deletionItems(for: needConfirmation)))\nContinue?")
             if !confirmDelete {
                 Print.withColor(.yellow, "Cancelled.")
                 return
@@ -86,7 +87,7 @@ struct Clean: ParsableCommand {
         }
         Print.withColor(.yellow, "all data...")
 
-        let confirmDelete = Prompt().yesNo("⚠️  This will erase simulator data, keychains, and caches. Continue?")
+        let confirmDelete = Prompt().yesNo("⚠️  `all` permanently deletes:\n\(bulleted(allCleanupItems(includingDerivedData: true)))\nContinue?")
         if !confirmDelete {
             Print.withColor(.yellow, "Cancelled.")
             return false
@@ -95,8 +96,7 @@ struct Clean: ParsableCommand {
         try deleteSimulatorsData()
         try deleteClonedSimulatorsDataAndUserDefaults()
 
-        try OptionInput.allCases
-            .filter { $0.rawValue >= 3 && $0.runsInAllCleanup }
+        try OptionInput.allCleanupOptions(includingDerivedData: true)
             .forEach {
             do {
                 try runCleanup($0)
@@ -119,8 +119,7 @@ struct Clean: ParsableCommand {
         try deleteSimulatorsData()
         try deleteClonedSimulatorsDataAndUserDefaults()
 
-        try OptionInput.allCases
-            .filter { $0.rawValue >= 4 && $0.runsInAllCleanup }
+        try OptionInput.allCleanupOptions(includingDerivedData: false)
             .forEach {
             do {
                 try runCleanup($0)
@@ -138,16 +137,41 @@ struct Clean: ParsableCommand {
             return Prompt().checkboxOptions(
                 optionDisplays(),
                 question: try checkboxMessage(),
-                label: { $0.label }
+                label: { $0.label },
+                detail: { $0.input.actionDescription }
             ).map { $0.input }
         }
     }
 
-    private func shouldConfirmDelete(for optionInputs: [OptionInput]) -> Bool {
-        optionInputs.contains(.clonedSimulatorsData)
-            || optionInputs.contains(.noDerivedData)
-            || optionInputs.contains(.archives)
-            || optionInputs.contains(.derivedData)
+    /// What the selected options delete, one line each. The "all except DerivedData" option is expanded
+    /// so the prompt names everything it removes.
+    private func deletionItems(for optionInputs: [OptionInput]) -> [String] {
+        var items: [String] = []
+        for optionInput in optionInputs {
+            let lines = optionInput == .noDerivedData
+                ? allCleanupItems(includingDerivedData: false)
+                : [optionInput.title]
+            items += lines.filter { !items.contains($0) }
+        }
+        return items
+    }
+
+    /// Everything an "all" cleanup removes, in the order it runs.
+    private func allCleanupItems(includingDerivedData: Bool) -> [String] {
+        var items: [String] = []
+        if !includingDerivedData {
+            items.append("📱 iOS DeviceSupport (all versions)")
+        }
+        items.append("⚠️  All simulators erased (apps, logins, keychains) + CoreSimulator caches")
+        items.append(OptionInput.clonedSimulatorsData.title)
+        items += OptionInput.allCleanupOptions(includingDerivedData: includingDerivedData)
+            .filter { $0.needsConfirmation }
+            .map { $0.title }
+        return items
+    }
+
+    private func bulleted(_ items: [String]) -> String {
+        items.map { "  • \($0)" }.joined(separator: "\n")
     }
 
     private func runCleanup(_ optionInput: OptionInput) throws {
@@ -254,7 +278,7 @@ struct Clean: ParsableCommand {
             label: { folder in
                 let usage = usages[folder] ?? .zero
                 let prefix = usage.isPartial ? "~" : ""
-                return "\((folder as NSString).lastPathComponent)  \(Print.Color.dim.rawValue)\(prefix)\(formatStorage(usage.bytes))\(Print.Color.reset.rawValue)"
+                return "\((folder as NSString).lastPathComponent.terminalSafe)  \(Print.Color.dim.rawValue)\(prefix)\(formatStorage(usage.bytes))\(Print.Color.reset.rawValue)"
             }
         )
 
@@ -263,7 +287,7 @@ struct Clean: ParsableCommand {
             return
         }
 
-        let names = selected.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")
+        let names = selected.map { ($0 as NSString).lastPathComponent.terminalSafe }.joined(separator: ", ")
         let confirmDelete = Prompt().yesNo("⚠️  Delete \(names)? Xcode copies the files again the next time you plug in a device running that version.")
         guard confirmDelete else {
             Print.withColor(.yellow, "Cancelled.")
@@ -271,7 +295,7 @@ struct Clean: ParsableCommand {
         }
 
         for folder in selected {
-            let name = (folder as NSString).lastPathComponent
+            let name = (folder as NSString).lastPathComponent.terminalSafe
             do {
                 try runWithLoader("Deleting \(name)") {
                     try FileManager.default.removeItem(atPath: folder)
@@ -342,7 +366,7 @@ struct Clean: ParsableCommand {
             Print.withColor(.yellow, "No folders larger than 5 GB found in scanned locations.")
         } else {
             Print.withColor(.cyan, "Showing largest 50 deepest folders (parent folders excluded):\n")
-            customPrint(output)
+            customPrint(output.components(separatedBy: "\n").map { $0.terminalSafe }.joined(separator: "\n"))
         }
 
         sendScanCompletionNotification()
@@ -360,7 +384,7 @@ struct Clean: ParsableCommand {
             folders,
             question: "\n\(Print.Color.boldGreen.rawValue)Safe to delete: select folders\(Print.Color.reset.rawValue)",
             label: { folder in
-                "\(String(format: "%.1f GB", folder.gigabytes))  \(folder.path)  \(Print.Color.dim.rawValue)\(folder.note)\(Print.Color.reset.rawValue)"
+                "\(String(format: "%.1f GB", folder.gigabytes))  \(folder.displayPath)  \(Print.Color.dim.rawValue)\(folder.note)\(Print.Color.reset.rawValue)"
             }
         )
 
@@ -370,7 +394,7 @@ struct Clean: ParsableCommand {
         }
 
         let total = selected.reduce(0) { $0 + $1.gigabytes }
-        let list = selected.map { "  \($0.path)" }.joined(separator: "\n")
+        let list = selected.map { "  \($0.displayPath)" }.joined(separator: "\n")
         let confirmDelete = Prompt().yesNo("⚠️  Delete \(selected.count) folder(s), \(String(format: "%.1f GB", total))?\n\(list)")
         guard confirmDelete else {
             Print.withColor(.yellow, "Cancelled.")
@@ -378,18 +402,18 @@ struct Clean: ParsableCommand {
         }
 
         for folder in selected {
-            // Re-check against the allowlist right before deleting.
-            guard SystemScanner.safeDeleteNote(for: folder.path) != nil else {
-                Print.withColor(.red, "Skipped \(folder.path): not on the safe-to-delete list")
+            // Re-check right before deleting: still on the allowlist, and no symlink swapped in since the scan.
+            guard SystemScanner.isSafeToDeleteNow(folder.path) else {
+                Print.withColor(.red, "Skipped \(folder.displayPath): not on the safe-to-delete list, or changed on disk since the scan")
                 continue
             }
             do {
-                try runWithLoader("Deleting \(folder.path)") {
+                try runWithLoader("Deleting \(folder.displayPath)") {
                     try FileManager.default.removeItem(atPath: folder.path)
                 }
-                Print.withColor(.green, "Deleted \(folder.path)")
+                Print.withColor(.green, "Deleted \(folder.displayPath)")
             } catch {
-                Print.withColor(.red, "Failed to delete \(folder.path): \(error)")
+                Print.withColor(.red, "Failed to delete \(folder.displayPath): \(error)")
             }
         }
         sendNotification(message: "Large folders cleaned")
@@ -576,10 +600,10 @@ extension Clean {
             case .noDerivedData: return "🥳 All, -> derived data excluded"
             case .simultorsData: return "⚠️  Erase simulators (apps, logins, keychains)"
             case .clonedSimulatorsData: return "Cloned simulators (tests & Playgrounds)"
-            case .archives: return "Archives"
+            case .archives: return "⚠️  Archives (.xcarchive & dSYMs, not recoverable)"
             case .previews: return "Previews"
             case .messagesAttachments: return "📩 Open Messages Attachments folder"
-            case .microsoftTeamsCache: return "Teams microsoft Cache"
+            case .microsoftTeamsCache: return "Teams (classic) app data, signs you out"
             case .documentationCache: return "QuickHelp Documentation Cache"
             case .trash: return "🗑️ System Trash"
             case .homebrewCache: return "🍺 Homebrew Cache"
@@ -591,8 +615,66 @@ extension Clean {
             }
         }
 
+        /// One plain-words line under each menu row: what choosing it will do.
+        var actionDescription: String {
+            switch self {
+            case .noDerivedData:
+                return "Bulk cleanup: simulators, clones, DeviceSupport, archives, previews, Teams, docs, Trash, Maestro. Keeps DerivedData."
+            case .simultorsData:
+                return "Lets you pick simulators, then shuts them down and erases apps, data and keychains. Devices stay installed."
+            case .clonedSimulatorsData:
+                return "Deletes the clone devices Xcode makes for parallel tests and Playgrounds. Xcode recreates them when needed."
+            case .derivedData:
+                return "Deletes Xcode's build products and indexes, including Mango's. The next build is slow, nothing is lost."
+            case .archives:
+                return "Permanently deletes every .xcarchive and its dSYMs. You can't re-export or symbolicate old builds afterwards."
+            case .previews:
+                return "Deletes the SwiftUI Preview cache. Previews rebuild it the next time you open them."
+            case .messagesAttachments:
+                return "Only opens the Messages Attachments folder in Finder so you can review it. Deletes nothing."
+            case .microsoftTeamsCache:
+                return "Deletes Teams (classic) local data and signs you out. Log in again next time."
+            case .documentationCache:
+                return "Deletes Xcode's QuickHelp documentation cache. It downloads again when you open the docs."
+            case .trash:
+                return "Permanently empties your Trash. Files can't be recovered."
+            case .homebrewCache:
+                return "Runs `brew cleanup --prune=all`: removes cached downloads and old versions of installed formulae."
+            case .maestroTests:
+                return "Deletes saved Maestro run output: screenshots, logs and recordings."
+            case .claudeJobsTmp:
+                return "Deletes the scratch tmp folder inside each Claude Code job. Job history is kept."
+            case .deviceSupport:
+                return "Lets you pick iOS versions to delete. Xcode copies the symbols again when you plug in a device."
+            case .simulatorRuntimes:
+                return "Lets you pick runtimes to delete with simctl. Download them again from Xcode to restore."
+            case .largeSystemFolders:
+                return "Scans the disk for folders over 5 GB, then lets you tick the safe ones to delete."
+            }
+        }
+
         var runsInAllCleanup: Bool {
             self != .largeSystemFolders && self != .simulatorRuntimes && self != .homebrewCache && self != .deviceSupport && self != .claudeJobsTmp
+        }
+
+        /// Deletes without a prompt of its own. Simulators, DeviceSupport, runtimes and the large-folder scan
+        /// ask per item; Messages only opens a folder.
+        var needsConfirmation: Bool {
+            switch self {
+            case .simultorsData, .deviceSupport, .simulatorRuntimes, .largeSystemFolders, .messagesAttachments:
+                return false
+            default:
+                return true
+            }
+        }
+
+        /// The options an "all" cleanup runs after erasing simulators and cloned devices.
+        static func allCleanupOptions(includingDerivedData: Bool) -> [OptionInput] {
+            allCases.filter {
+                $0.runsInAllCleanup
+                    && ![.noDerivedData, .simultorsData, .clonedSimulatorsData].contains($0)
+                    && (includingDerivedData || $0 != .derivedData)
+            }
         }
 
         static let deviceSupportPath = "~/Library/Developer/Xcode/iOS DeviceSupport"

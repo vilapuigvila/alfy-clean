@@ -19,7 +19,7 @@ struct Avp: ParsableCommand {
     abstract: "avp helper",
     version: "avp version \(Constant.App.version)",
     subcommands: [
-        Cache.self, Clean.self, Pusher.self
+        Cache.self, Clean.self
     ]
   )
 }

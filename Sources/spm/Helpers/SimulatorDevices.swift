@@ -8,7 +8,8 @@ import Foundation
 
 struct SimulatorDevice: Decodable {
     let udid: String
-    let name: String
+    /// User-editable, so made `terminalSafe` in `list()` before it's ever printed.
+    var name: String
     let state: String
     let isAvailable: Bool
     let dataPath: String
@@ -41,7 +42,8 @@ struct SimulatorDevices {
                 .filter { $0.isAvailable }
                 .map { device -> SimulatorDevice in
                     var device = device
-                    device.runtime = runtimeName(runtimeIdentifier)
+                    device.name = device.name.terminalSafe
+                    device.runtime = runtimeName(runtimeIdentifier).terminalSafe
                     return device
                 }
         }

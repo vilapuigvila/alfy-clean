@@ -40,3 +40,16 @@ struct Print {
         print("\(color.rawValue)\u{1B}[1A\u{1B}[K\(output)")
     }
 }
+
+extension String {
+    /// Control characters (C0, DEL, C1) replaced with "?", so a crafted file or simulator name can't move
+    /// the cursor, recolor or rewrite what the terminal shows. Use on any name that didn't come from avp.
+    var terminalSafe: String {
+        var result = String.UnicodeScalarView()
+        for scalar in unicodeScalars {
+            let isControl = scalar.value < 0x20 || (0x7F...0x9F).contains(scalar.value)
+            result.append(isControl ? "?" : scalar)
+        }
+        return String(result)
+    }
+}
