@@ -134,12 +134,10 @@ struct Clean: ParsableCommand {
             option = shortOption
             return [try OptionInput(value: option)]
         } else {
-            return Prompt().checkboxOptions(
-                optionDisplays(),
-                question: try checkboxMessage(),
-                label: { $0.label },
-                detail: { $0.input.actionDescription }
-            ).map { $0.input }
+            let entries = menuEntries()
+            let picked = Prompt().checkboxTable(entries.map { $0.row }, question: try checkboxMessage())
+            // Run in menu-definition order, not size order.
+            return picked.map { entries[$0].input }.sorted { $0.rawValue < $1.rawValue }
         }
     }
 
@@ -653,6 +651,112 @@ extension Clean {
             }
         }
 
+        /// Kept in the code (and reachable with `-d <n>` / `all`) but not offered in the interactive menu.
+        var isHiddenInMenu: Bool {
+            switch self {
+            case .noDerivedData, .maestroTests, .microsoftTeamsCache, .messagesAttachments:
+                return true
+            default:
+                return false
+            }
+        }
+
+        static var menuOptions: [OptionInput] {
+            allCases.filter { !$0.isHiddenInMenu }
+        }
+
+        /// Plain text (no emoji) so the table columns line up.
+        var tableName: String {
+            switch self {
+            case .noDerivedData: return "All except Derived Data"
+            case .simultorsData: return "Erase simulators"
+            case .clonedSimulatorsData: return "Cloned simulators"
+            case .derivedData: return "Derived Data"
+            case .archives: return "Archives"
+            case .previews: return "Previews"
+            case .messagesAttachments: return "Messages attachments"
+            case .microsoftTeamsCache: return "Teams (classic) data"
+            case .documentationCache: return "Documentation cache"
+            case .trash: return "System Trash"
+            case .homebrewCache: return "Homebrew cache"
+            case .maestroTests: return "Maestro test output"
+            case .claudeJobsTmp: return "Claude Code jobs tmp"
+            case .deviceSupport: return "iOS DeviceSupport"
+            case .simulatorRuntimes: return "Simulator runtimes"
+            case .largeSystemFolders: return "Scan for folders over 5 GB"
+            }
+        }
+
+        var risk: CheckboxTableRow.Risk {
+            switch self {
+            case .noDerivedData: return .bulk
+            case .derivedData, .previews, .documentationCache, .clonedSimulatorsData,
+                 .homebrewCache, .maestroTests, .claudeJobsTmp:
+                return .safe
+            case .simultorsData, .deviceSupport, .simulatorRuntimes: return .pick
+            case .archives, .trash: return .final
+            case .microsoftTeamsCache: return .slow
+            case .messagesAttachments, .largeSystemFolders: return .look
+            }
+        }
+
+        /// The user chooses items in a follow-up prompt, so the size shown is a ceiling.
+        var picksItemsNext: Bool {
+            self == .simultorsData || self == .deviceSupport || self == .simulatorRuntimes
+        }
+
+        /// What it removes, for the "Deletes" line of the detail box.
+        var deletesDescription: String {
+            switch self {
+            case .noDerivedData: return "Everything in the bulk cleanup, except Derived Data"
+            case .simultorsData: return "Apps, data and keychains of the simulators you tick"
+            case .clonedSimulatorsData: return "~/Library/Developer/XCTestDevices and XCPGDevices"
+            case .derivedData: return "~/Library/Developer/Xcode/DerivedData and Mango's DerivedData"
+            case .archives: return "~/Library/Developer/Xcode/Archives"
+            case .previews: return "~/Library/Developer/Xcode/UserData/Previews"
+            case .messagesAttachments: return "Nothing, it only opens ~/Library/Messages/Attachments"
+            case .microsoftTeamsCache: return "~/Library/Application Support/Microsoft/Teams"
+            case .documentationCache: return "~/Library/Developer/Xcode/DocumentationCache"
+            case .trash: return "Everything in ~/.Trash"
+            case .homebrewCache: return "Homebrew's cache and old versions (brew cleanup --prune=all)"
+            case .maestroTests: return "~/.maestro/tests"
+            case .claudeJobsTmp: return "The tmp folder inside each ~/.claude/jobs/<job>"
+            case .deviceSupport: return "The iOS versions you tick in ~/Library/Developer/Xcode/iOS DeviceSupport"
+            case .simulatorRuntimes: return "The runtimes you tick, through simctl"
+            case .largeSystemFolders: return "Nothing until you tick folders from the scan"
+            }
+        }
+
+        var comesBackDescription: String {
+            switch self {
+            case .noDerivedData: return "Mostly; archives and the Trash don't"
+            case .simultorsData: return "No: apps and data are wiped, devices stay"
+            case .clonedSimulatorsData: return "Yes, Xcode recreates them"
+            case .derivedData: return "Yes, on the next build"
+            case .archives: return "No, gone for good"
+            case .previews: return "Yes, when a preview opens"
+            case .messagesAttachments: return "Not applicable"
+            case .microsoftTeamsCache: return "Cache yes; you sign in again"
+            case .documentationCache: return "Yes, downloads when you open the docs"
+            case .trash: return "No, gone for good"
+            case .homebrewCache: return "Yes, downloaded again when needed"
+            case .maestroTests: return "Yes, on the next test run"
+            case .claudeJobsTmp: return "Yes, jobs recreate it"
+            case .deviceSupport: return "Yes, when you plug a device in"
+            case .simulatorRuntimes: return "Yes, from Xcode > Settings > Components"
+            case .largeSystemFolders: return "Depends on what you delete"
+            }
+        }
+
+        var asksFirstDescription: String {
+            switch self {
+            case .messagesAttachments: return "Nothing to ask, it only opens the folder"
+            case .largeSystemFolders: return "Per folder, before anything is removed"
+            case .simultorsData, .deviceSupport, .simulatorRuntimes: return "Per item, before anything is removed"
+            default: return "One yes/no before it runs, listing what goes"
+            }
+        }
+
         var runsInAllCleanup: Bool {
             self != .largeSystemFolders && self != .simulatorRuntimes && self != .homebrewCache && self != .deviceSupport && self != .claudeJobsTmp
         }
@@ -767,45 +871,53 @@ extension Clean {
 // MARK: Text descriptions -
 
 private extension Clean {
-    struct OptionDisplay {
+    struct MenuEntry {
         let input: OptionInput
-        let label: String
+        let row: CheckboxTableRow
     }
 
-    func optionDisplays() -> [OptionDisplay] {
+    /// The visible options as table rows, biggest first (ties keep menu order).
+    func menuEntries() -> [MenuEntry] {
         let estimatesByPath = diskUsageEstimatesByPath()
         let runtimesBytes = SimulatorRuntimes.list().reduce(0) { $0 + $1.sizeBytes }
 
-        return OptionInput.allCases.map { optionInput in
-            if optionInput == .largeSystemFolders {
-                return OptionDisplay(
-                    input: optionInput,
-                    label: "\(optionInput.title)  \(Print.Color.dim.rawValue)scan only\(Print.Color.reset.rawValue)"
-                )
+        let entries = OptionInput.menuOptions.map { optionInput -> MenuEntry in
+            var bytes: UInt64 = 0
+            var size = "scan"
+            var isApproximate = false
+
+            switch optionInput {
+            case .largeSystemFolders:
+                break
+            case .simulatorRuntimes:
+                bytes = runtimesBytes
+                size = formatStorage(runtimesBytes)
+            default:
+                let estimate = estimatedFreeSpace(for: optionInput, estimatesByPath: estimatesByPath)
+                bytes = estimate.bytes
+                isApproximate = estimate.isPartial
+                size = (estimate.isPartial ? "~" : "") + formatStorage(estimate.bytes)
             }
 
-            if optionInput == .simulatorRuntimes {
-                return OptionDisplay(
-                    input: optionInput,
-                    label: "\(optionInput.title)  \(Print.Color.dim.rawValue)pick which  •  up to \(formatStorage(runtimesBytes))\(Print.Color.reset.rawValue)"
-                )
-            }
-
-            let estimate = estimatedFreeSpace(for: optionInput, estimatesByPath: estimatesByPath)
-            let prefix = estimate.isPartial ? "~" : ""
-
-            if optionInput == .deviceSupport || optionInput == .simultorsData {
-                return OptionDisplay(
-                    input: optionInput,
-                    label: "\(optionInput.title)  \(Print.Color.dim.rawValue)pick which  •  up to \(prefix)\(formatStorage(estimate.bytes))\(Print.Color.reset.rawValue)"
-                )
-            }
-            let estimateText = "\(Print.Color.dim.rawValue)will free \(prefix)\(formatStorage(estimate.bytes))\(Print.Color.reset.rawValue)"
-            return OptionDisplay(
-                input: optionInput,
-                label: "\(optionInput.title)  \(estimateText)"
-            )
+            return MenuEntry(input: optionInput, row: CheckboxTableRow(
+                name: optionInput.tableName,
+                bytes: bytes,
+                size: size,
+                risk: optionInput.risk,
+                isApproximate: isApproximate,
+                isUpperBound: optionInput.picksItemsNext,
+                summary: optionInput.actionDescription,
+                facts: [
+                    ("Deletes", optionInput.deletesDescription),
+                    ("Comes back", optionInput.comesBackDescription),
+                    ("Asks first", optionInput.asksFirstDescription)
+                ]
+            ))
         }
+
+        return entries.enumerated()
+            .sorted { ($0.element.row.bytes, $1.offset) > ($1.element.row.bytes, $0.offset) }
+            .map { $0.element }
     }
 
     func checkboxMessage() throws -> String {
@@ -839,7 +951,7 @@ private extension Clean {
     typealias DiskUsageEstimate = DiskUsage
 
     func diskUsageEstimatesByPath() -> [String: DiskUsageEstimate] {
-        let uniquePaths = Array(Set(OptionInput.allCases.flatMap { $0.estimatedPaths }))
+        let uniquePaths = Array(Set(OptionInput.menuOptions.flatMap { $0.estimatedPaths }))
         let loader = TerminalLoader("Measuring folder sizes (this may take a minute)")
         loader.start()
         let result = DiskUsage.measure(paths: uniquePaths)

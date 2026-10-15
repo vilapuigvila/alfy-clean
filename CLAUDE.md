@@ -29,11 +29,12 @@ its `CommandConfiguration.subcommands` array and calls `Avp.main()`.
 
 - **Subcommands** (`Sources/spm/Subcommands/`) — each is a `ParsableCommand` struct/class:
   - `Cache` — lists disk usage (`du -hs`) of Xcode/developer folders; has a nested `List` subcommand.
-  - `Clean` — deletes DerivedData, archives, simulator data, keychains, etc. via shell `rm`. Options are indexed by the `OptionInput` enum; `Clean.run()` maps a numeric input (arg or interactive prompt) to an action.
+  - `Clean` — deletes DerivedData, archives, simulator data, keychains, etc. via shell `rm`. Options are indexed by the `OptionInput` enum; `isHiddenInMenu` options (all-except-DerivedData, Maestro, Teams, Messages) stay in the code and in `-d <n>` / `all` but aren't offered in the menu; `Clean.run()` maps a numeric input (arg or interactive prompt) to an action.
   - `XcodeBuild` — **defined but NOT registered** in `main.swift`; its `run()` is a no-op stub. Wire it into the `subcommands` array to activate it.
 - **Helpers** (`Sources/spm/Helpers/`):
   - `Global.swift` — `shell(_:)` runs a command through `/bin/zsh -c` and returns stdout+stderr; `keyboardInput()` reads a line.
   - `Print.swift` — ANSI-colored output (`Print.withColor`, `.h3`, `.h6`).
+  - `CheckboxTable.swift` — rows and layout of the `avp clean` menu (size-ranked table, detail box for the focused row, running total); `Prompt.checkboxTable` drives it and shrinks the frame when the terminal is short.
   - `Prompt.swift` — interactive `ask`/`yesNo`/`options`. Its I/O goes through `customPrint`/`customReadline`, which can be swapped in tests via the global `TestablePrintFunction`/`TestableReadLineFunction` hooks.
   - `AVPTimer.swift` — CFRunLoop-based repeating "Wait…" spinner.
 - **Extensions** (`Sources/spm/Extensions/`):

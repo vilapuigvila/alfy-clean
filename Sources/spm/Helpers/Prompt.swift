@@ -159,26 +159,7 @@ final class Prompt {
             return lineInputCheckboxOptions(options, question: question, label: label, detail: detail)
         }
 
-        var selectedIndexes = Set<Int>()
-        var focusedIndex = 0
-        var renderedLineCount = 0
-
-        guard let rawMode = TerminalRawMode() else {
-            return lineInputCheckboxOptions(options, question: question, label: label, detail: detail)
-        }
-        defer {
-            rawMode.restore()
-            writeTerminal("\u{001B}[?25h")
-        }
-
-        writeTerminal("\u{001B}[?25l")
-
-        func render() {
-            if renderedLineCount > 0 {
-                writeTerminal("\u{001B}[\(renderedLineCount)A")
-                writeTerminal("\u{001B}[J")
-            }
-
+        let picked = runSelectionLoop(count: options.count) { focusedIndex, selectedIndexes in
             var lines: [String] = []
             if let question = question {
                 lines.append(contentsOf: question.components(separatedBy: .newlines))
@@ -214,7 +195,64 @@ final class Prompt {
                     lines.append("\(Print.Color.dim.rawValue)\(detailIndent)\(shown)\(Print.Color.reset.rawValue)")
                 }
             }
+            return lines
+        }
 
+        guard let picked else {
+            return lineInputCheckboxOptions(options, question: question, label: label, detail: detail)
+        }
+        return picked.map { options[$0] }
+    }
+
+    /// Interactive size-ranked table: one line per row with a size bar, a detail box for the focused row
+    /// and a running total. Returns the chosen row indexes.
+    func checkboxTable(_ rows: [CheckboxTableRow], question: String? = nil) -> [Int] {
+        guard !rows.isEmpty else { return [] }
+        guard isatty(STDIN_FILENO) != 0 else {
+            return lineInputCheckboxTable(rows, question: question)
+        }
+
+        let picked = runSelectionLoop(count: rows.count) { focusedIndex, selectedIndexes in
+            CheckboxTableLayout(rows: rows, question: question, size: terminalSize())
+                .lines(focused: focusedIndex, selected: selectedIndexes)
+        }
+        return picked ?? lineInputCheckboxTable(rows, question: question)
+    }
+
+    private func lineInputCheckboxTable(_ rows: [CheckboxTableRow], question: String?) -> [Int] {
+        checkboxOptions(
+            Array(rows.indices),
+            question: question,
+            label: { "\(rows[$0].name)  \(rows[$0].size)  \(rows[$0].risk.tag)" },
+            detail: { rows[$0].summary }
+        )
+    }
+
+    /// Raw-mode key loop shared by the checkbox menus. `draw` returns every line to show for the current
+    /// focus and selection; the previous frame is erased before each redraw, so a frame must fit the screen.
+    /// Returns the selected indexes (empty when cancelled), or nil if the terminal can't enter raw mode.
+    private func runSelectionLoop(
+        count: Int,
+        draw: (_ focused: Int, _ selected: Set<Int>) -> [String]
+    ) -> [Int]? {
+        var selectedIndexes = Set<Int>()
+        var focusedIndex = 0
+        var renderedLineCount = 0
+
+        guard let rawMode = TerminalRawMode() else { return nil }
+        defer {
+            rawMode.restore()
+            writeTerminal("\u{001B}[?25h")
+        }
+
+        writeTerminal("\u{001B}[?25l")
+
+        func render() {
+            if renderedLineCount > 0 {
+                writeTerminal("\u{001B}[\(renderedLineCount)A")
+                writeTerminal("\u{001B}[J")
+            }
+            let lines = draw(focusedIndex, selectedIndexes)
             renderedLineCount = lines.count
             writeTerminal(lines.joined(separator: "\n") + "\n")
         }
@@ -224,10 +262,10 @@ final class Prompt {
         while true {
             switch readTerminalKey() {
             case .up:
-                focusedIndex = focusedIndex == 0 ? options.count - 1 : focusedIndex - 1
+                focusedIndex = focusedIndex == 0 ? count - 1 : focusedIndex - 1
                 render()
             case .down:
-                focusedIndex = focusedIndex == options.count - 1 ? 0 : focusedIndex + 1
+                focusedIndex = focusedIndex == count - 1 ? 0 : focusedIndex + 1
                 render()
             case .space:
                 if selectedIndexes.contains(focusedIndex) {
@@ -238,15 +276,15 @@ final class Prompt {
                 render()
             case .enter:
                 writeTerminal("\n")
-                return selectedIndexes.sorted().map { options[$0] }
+                return selectedIndexes.sorted()
             case .character(let byte) where byte == CharacterKey.q:
                 writeTerminal("\n")
                 return []
             case .character(let byte) where byte == CharacterKey.k:
-                focusedIndex = focusedIndex == 0 ? options.count - 1 : focusedIndex - 1
+                focusedIndex = focusedIndex == 0 ? count - 1 : focusedIndex - 1
                 render()
             case .character(let byte) where byte == CharacterKey.j:
-                focusedIndex = focusedIndex == options.count - 1 ? 0 : focusedIndex + 1
+                focusedIndex = focusedIndex == count - 1 ? 0 : focusedIndex + 1
                 render()
             case .unknown, .character:
                 continue
