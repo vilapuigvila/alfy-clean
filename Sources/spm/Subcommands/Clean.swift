@@ -166,7 +166,7 @@ struct Clean: ParsableCommand {
             try deleteDeviceSupportVersions()
         case .simulatorRuntimes:
             try deleteSimulatorRuntimes()
-        case .derivedData, .archives, .previews, .messagesAttachments, .microsoftTeamsCache, .documentationCache, .trash, .homebrewCache:
+        case .derivedData, .archives, .previews, .messagesAttachments, .microsoftTeamsCache, .documentationCache, .trash, .homebrewCache, .maestroTests, .claudeJobsTmp:
             let command = try optionInput.shellCommand()
             try runWithLoader("Cleaning \(optionInput.title)") {
                 let result = shell(command)
@@ -542,6 +542,8 @@ extension Clean {
         case documentationCache             // QuickHelp docs (regenerates on access)
         case trash                          // System trash bin
         case homebrewCache                  // Homebrew downloads & old versions (brew cleanup)
+        case maestroTests                   // Maestro test run outputs (screenshots, logs)
+        case claudeJobsTmp                  // Claude Code job scratch folders (~/.claude/jobs/*/tmp)
         case deviceSupport                  // Per-version device symbols (re-copied on device plug-in)
         case simulatorRuntimes              // ⚠️ Installed runtimes (re-download to restore)
         case largeSystemFolders             // Scan for large system folders (info only)
@@ -558,9 +560,11 @@ extension Clean {
             case 8: self = .documentationCache
             case 9: self = .trash
             case 10: self = .homebrewCache
-            case 11: self = .deviceSupport
-            case 12: self = .simulatorRuntimes
-            case 13: self = .largeSystemFolders
+            case 11: self = .maestroTests
+            case 12: self = .claudeJobsTmp
+            case 13: self = .deviceSupport
+            case 14: self = .simulatorRuntimes
+            case 15: self = .largeSystemFolders
             default: throw "Manage this case \(value)"
             }
         }
@@ -579,6 +583,8 @@ extension Clean {
             case .documentationCache: return "QuickHelp Documentation Cache"
             case .trash: return "🗑️ System Trash"
             case .homebrewCache: return "🍺 Homebrew Cache"
+            case .maestroTests: return "🎭 Maestro tests output"
+            case .claudeJobsTmp: return "🤖 Claude Code jobs tmp folders"
             case .deviceSupport: return "📱 iOS DeviceSupport versions"
             case .simulatorRuntimes: return "📦 Simulator runtimes"
             case .largeSystemFolders: return "🔎 List system folders > 5 GB"
@@ -586,10 +592,18 @@ extension Clean {
         }
 
         var runsInAllCleanup: Bool {
-            self != .largeSystemFolders && self != .simulatorRuntimes && self != .homebrewCache && self != .deviceSupport
+            self != .largeSystemFolders && self != .simulatorRuntimes && self != .homebrewCache && self != .deviceSupport && self != .claudeJobsTmp
         }
 
         static let deviceSupportPath = "~/Library/Developer/Xcode/iOS DeviceSupport"
+        static let claudeJobsPath = "~/.claude/jobs"
+
+        // One `tmp` folder per job; `du` doesn't expand globs, so list them.
+        static var claudeJobsTmpPaths: [String] {
+            let root = (claudeJobsPath as NSString).expandingTildeInPath
+            let jobs = (try? FileManager.default.contentsOfDirectory(atPath: root)) ?? []
+            return jobs.map { "\(claudeJobsPath)/\($0)/tmp" }
+        }
 
         var estimatedPaths: [String] {
             switch self {
@@ -605,17 +619,24 @@ extension Clean {
                     "~/Library/Developer/Xcode/DocumentationCache",
                     "~/Library/Messages/Attachments",
                     "~/Library/Application Support/Microsoft/Teams",
-                    "~/.Trash"
+                    "~/.Trash",
+                    "~/.maestro/tests"
                 ]
             case .simultorsData:
-                return ["~/Library/Developer/CoreSimulator/Devices"]
+                return [
+                    "~/Library/Developer/CoreSimulator/Devices",
+                    "~/Library/Developer/CoreSimulator/Caches"
+                ]
             case .clonedSimulatorsData:
                 return [
                     "~/Library/Developer/XCTestDevices",
                     "~/Library/Developer/XCPGDevices"
                 ]
             case .derivedData:
-                return ["~/Library/Developer/Xcode/DerivedData"]
+                return [
+                    "~/Library/Developer/Xcode/DerivedData",
+                    "~/Projects/InQBarna/Mango/DerivedData"
+                ]
             case .archives:
                 return ["~/Library/Developer/Xcode/Archives"]
             case .previews:
@@ -630,6 +651,10 @@ extension Clean {
                 return ["~/.Trash"]
             case .homebrewCache:
                 return ["~/Library/Caches/Homebrew"]
+            case .maestroTests:
+                return ["~/.maestro/tests"]
+            case .claudeJobsTmp:
+                return Self.claudeJobsTmpPaths
             case .deviceSupport:
                 return [Self.deviceSupportPath]
             case .simulatorRuntimes, .largeSystemFolders:
@@ -642,7 +667,7 @@ extension Clean {
             case .noDerivedData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .simultorsData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .clonedSimulatorsData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
-            case .derivedData: return "rm -rf ~/Library/Developer/Xcode/DerivedData"
+            case .derivedData: return "rm -rf ~/Library/Developer/Xcode/DerivedData ~/Projects/InQBarna/Mango/DerivedData"
             case .archives: return "rm -rf ~/Library/Developer/Xcode/Archives"
             case .previews: return "rm -rf ~/Library/Developer/Xcode/UserData/Previews"
             case .messagesAttachments: return  "open ~/Library/Messages/Attachments"
@@ -650,6 +675,8 @@ extension Clean {
             case .documentationCache: return "rm -Rf ~/Library/Developer/Xcode/DocumentationCache"
             case .trash: return "if [ -d ~/.Trash ]; then find ~/.Trash -mindepth 1 -maxdepth 1 -exec rm -rf {} +; fi"
             case .homebrewCache: return "PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\" brew cleanup --prune=all"
+            case .maestroTests: return "rm -rf ~/.maestro/tests"
+            case .claudeJobsTmp: return "if [ -d ~/.claude/jobs ]; then find ~/.claude/jobs -mindepth 2 -maxdepth 2 -name tmp -type d -exec rm -rf {} +; fi"
             case .deviceSupport: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .simulatorRuntimes: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .largeSystemFolders: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
