@@ -17,8 +17,7 @@ let package = Package(
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
-            path: "Sources/spm",
-            exclude: ["Resources/Scripts/buildWithTimingSummary.sh"]),
+            path: "Sources/spm"),
         .testTarget(
             name: "avpTests",
             dependencies: ["avp"],

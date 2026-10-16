@@ -14,6 +14,8 @@ struct Clean: ParsableCommand {
     )
     
     private var isDone: Bool = false
+    /// The Derived Data folders to delete, once the user has picked from the menu. Nil means all that were found.
+    private var derivedDataFolders: [String]?
     private var option: Int = 0 {
         didSet {
             if !(0..<OptionInput.allCases.count).contains(option) {
@@ -136,9 +138,15 @@ struct Clean: ParsableCommand {
             return [try OptionInput(value: option)]
         } else {
             let entries = menuEntries()
+            // Measuring sizes can take a while: tell the user the menu is ready.
+            sendNotification(message: "Choose what to clean")
             let picked = Prompt().checkboxTable(entries.map { $0.row }, question: try checkboxMessage())
             // Run in menu-definition order, not size order.
-            return picked.map { entries[$0].input }.sorted { $0.rawValue < $1.rawValue }
+            let inputs = picked.map { entries[$0].input }.sorted { $0.rawValue < $1.rawValue }
+            if inputs.contains(.derivedData) {
+                derivedDataFolders = try pickDerivedDataFolders()
+            }
+            return inputs
         }
     }
 
@@ -149,7 +157,7 @@ struct Clean: ParsableCommand {
         for optionInput in optionInputs {
             let lines = optionInput == .noDerivedData
                 ? allCleanupItems(includingDerivedData: false)
-                : [optionInput.title]
+                : titleLines(for: optionInput)
             items += lines.filter { !items.contains($0) }
         }
         return items
@@ -165,12 +173,18 @@ struct Clean: ParsableCommand {
         items.append(OptionInput.clonedSimulatorsData.title)
         items += OptionInput.allCleanupOptions(includingDerivedData: includingDerivedData)
             .filter { $0.needsConfirmation }
-            .map { $0.title }
+            .flatMap { titleLines(for: $0) }
         return items
     }
 
+    /// The option's title, followed by the folders it will delete when they are found at runtime.
+    private func titleLines(for optionInput: OptionInput) -> [String] {
+        guard optionInput == .derivedData else { return [optionInput.title] }
+        return [optionInput.title] + (derivedDataFolders ?? DerivedDataDiscovery.found).map { "    \($0)" }
+    }
+
     private func bulleted(_ items: [String]) -> String {
-        items.map { "  • \($0)" }.joined(separator: "\n")
+        items.map { $0.hasPrefix(" ") ? "  \($0)" : "  • \($0)" }.joined(separator: "\n")
     }
 
     private func runCleanup(_ optionInput: OptionInput) throws {
@@ -189,7 +203,12 @@ struct Clean: ParsableCommand {
             try deleteDeviceSupportVersions()
         case .simulatorRuntimes:
             try deleteSimulatorRuntimes()
-        case .derivedData, .archives, .previews, .messagesAttachments, .microsoftTeamsCache, .documentationCache, .trash, .homebrewCache, .maestroTests, .claudeJobsTmp:
+        case .userCaches:
+            try deleteLargeCacheFolders()
+        case .derivedData:
+            try deleteDerivedData(derivedDataFolders ?? DerivedDataDiscovery.found)
+            sendNotification(message: "\(optionInput.title) cleaned")
+        case .archives, .swiftPMCache, .previews, .messagesAttachments, .microsoftTeamsCache, .documentationCache, .trash, .homebrewCache, .maestroTests, .claudeJobsTmp:
             let command = try optionInput.command()
             // Nothing to clean (e.g. no Trash or jobs folder yet) counts as done, like an `rm -rf` of a missing folder.
             if let required = command.requiredFolder,
@@ -203,6 +222,46 @@ struct Clean: ParsableCommand {
                 }
             }
             sendNotification(message: "\(optionInput.title) cleaned")
+        }
+    }
+
+    /// The default Xcode folder is always part of Derived Data. When projects keep their own `DerivedData`
+    /// folders (worktrees, `-derivedDataPath`), the user picks which of those go too.
+    private func pickDerivedDataFolders() throws -> [String] {
+        let defaultFolder = (expandTilde(DerivedDataDiscovery.defaultLocation) as NSString).standardizingPath
+        let found = DerivedDataDiscovery.found
+        let others = found.filter { $0 != defaultFolder }
+        let base = found.filter { $0 == defaultFolder }
+        guard !others.isEmpty else { return base }
+
+        var usages: [String: DiskUsage] = [:]
+        try runWithLoader("Measuring other Derived Data folders") {
+            usages = DiskUsage.measure(paths: others)
+        }
+        let sorted = others.sorted { (usages[$0]?.bytes ?? 0) > (usages[$1]?.bytes ?? 0) }
+        let home = NSHomeDirectory()
+
+        let selected = Prompt().checkboxOptions(
+            sorted,
+            question: "\n\(Print.Color.boldGreen.rawValue)Other Derived Data folders to delete too\(Print.Color.reset.rawValue)  \(Print.Color.dim.rawValue)Xcode's own folder is always cleaned; leave all unticked to keep these\(Print.Color.reset.rawValue)",
+            label: { folder in
+                let usage = usages[folder] ?? .zero
+                let prefix = usage.isPartial ? "~" : ""
+                let shown = folder.hasPrefix(home + "/") ? "~" + folder.dropFirst(home.count) : folder
+                return "\(shown.terminalSafe)  \(Print.Color.dim.rawValue)\(prefix)\(formatStorage(usage.bytes))\(Print.Color.reset.rawValue)"
+            }
+        )
+        return base + selected
+    }
+
+    private func deleteDerivedData(_ folders: [String]) throws {
+        guard !folders.isEmpty else { return }
+        let command = OptionInput.remove(folders)
+        try runWithLoader("Cleaning \(OptionInput.derivedData.title)") {
+            let result = runProcess(command.executable, command.arguments, searchPath: command.searchPath)
+            if !result.success {
+                throw "Command failed with exit code \(result.exitCode): \(command.display)"
+            }
         }
     }
 
@@ -257,6 +316,60 @@ struct Clean: ParsableCommand {
             }
         }
         sendNotification(message: "Simulators erased")
+    }
+
+    /// Lets the user pick which folders over 1 GB directly inside ~/Library/Caches to delete.
+    private func deleteLargeCacheFolders() throws {
+        var large: [(path: String, usage: DiskUsage)] = []
+        try runWithLoader("Measuring ~/Library/Caches") {
+            let folders = UserCaches.rootFolders()
+            large = UserCaches.largeFolders(folders, usages: DiskUsage.measure(paths: folders))
+        }
+
+        guard !large.isEmpty else {
+            Print.withColor(.yellow, "No folders over \(formatStorage(UserCaches.minimumBytes)) in ~/Library/Caches.")
+            return
+        }
+
+        let selected = Prompt().checkboxOptions(
+            large,
+            question: "\n\(Print.Color.boldGreen.rawValue)Select folders in ~/Library/Caches to delete\(Print.Color.reset.rawValue)  \(Print.Color.dim.rawValue)only folders over \(formatStorage(UserCaches.minimumBytes)); apps rebuild them\(Print.Color.reset.rawValue)",
+            label: { folder in
+                let prefix = folder.usage.isPartial ? "~" : ""
+                let name = (folder.path as NSString).lastPathComponent.terminalSafe
+                return "\(name)  \(Print.Color.dim.rawValue)\(prefix)\(formatStorage(folder.usage.bytes))\(Print.Color.reset.rawValue)"
+            }
+        )
+
+        guard !selected.isEmpty else {
+            Print.withColor(.yellow, "No folders selected.")
+            return
+        }
+
+        let names = selected.map { (($0.path as NSString).lastPathComponent).terminalSafe }.joined(separator: ", ")
+        let confirmDelete = Prompt().yesNo("⚠️  Delete \(names) from ~/Library/Caches? The apps that own them rebuild the cache; some may sign you out or download data again.")
+        guard confirmDelete else {
+            Print.withColor(.yellow, "Cancelled.")
+            return
+        }
+
+        for folder in selected {
+            let name = (folder.path as NSString).lastPathComponent.terminalSafe
+            // Re-check right before deleting: still a direct, real folder of ~/Library/Caches.
+            guard UserCaches.isSafeToDeleteNow(folder.path) else {
+                Print.withColor(.red, "Skipped \(name): not a plain folder of ~/Library/Caches any more")
+                continue
+            }
+            do {
+                try runWithLoader("Deleting \(name)") {
+                    try FileManager.default.removeItem(atPath: folder.path)
+                }
+                Print.withColor(.green, "Deleted \(name)")
+            } catch {
+                Print.withColor(.red, "Failed to delete \(name): \(error)")
+            }
+        }
+        sendNotification(message: "Caches cleaned")
     }
 
     private func deleteDeviceSupportVersions() throws {
@@ -567,6 +680,8 @@ extension Clean {
         case deviceSupport                  // Per-version device symbols (re-copied on device plug-in)
         case simulatorRuntimes              // ⚠️ Installed runtimes (re-download to restore)
         case largeSystemFolders             // Scan for large system folders (info only)
+        case swiftPMCache                   // SwiftPM package cache (~/Library/Caches/org.swift.swiftpm)
+        case userCaches                     // Pick big folders (> 1 GB) directly inside ~/Library/Caches
         init(value: Int) throws {
             switch value {
             case 0: self = .noDerivedData
@@ -585,6 +700,8 @@ extension Clean {
             case 13: self = .deviceSupport
             case 14: self = .simulatorRuntimes
             case 15: self = .largeSystemFolders
+            case 16: self = .swiftPMCache
+            case 17: self = .userCaches
             default: throw "Manage this case \(value)"
             }
         }
@@ -608,6 +725,8 @@ extension Clean {
             case .deviceSupport: return "📱 iOS DeviceSupport versions"
             case .simulatorRuntimes: return "📦 Simulator runtimes"
             case .largeSystemFolders: return "🔎 List system folders > 5 GB"
+            case .swiftPMCache: return "📦 SwiftPM cache"
+            case .userCaches: return "🗂️ Big folders in ~/Library/Caches"
             }
         }
 
@@ -615,13 +734,13 @@ extension Clean {
         var actionDescription: String {
             switch self {
             case .noDerivedData:
-                return "Bulk cleanup: simulators, clones, DeviceSupport, archives, previews, Teams, docs, Trash, Maestro. Keeps DerivedData."
+                return "Bulk cleanup: simulators, clones, DeviceSupport, archives, previews, Teams, docs, SwiftPM cache, Trash, Maestro. Keeps DerivedData."
             case .simultorsData:
                 return "Lets you pick simulators, then shuts them down and erases apps, data and keychains. Devices stay installed."
             case .clonedSimulatorsData:
                 return "Deletes the clone devices Xcode makes for parallel tests and Playgrounds. Xcode recreates them when needed."
             case .derivedData:
-                return "Deletes Xcode's build products and indexes, including Mango's. The next build is slow, nothing is lost."
+                return "Deletes Xcode's build products and indexes, in every Xcode project folder it finds. The next build is slow, nothing is lost."
             case .archives:
                 return "Permanently deletes every .xcarchive and its dSYMs. You can't re-export or symbolicate old builds afterwards."
             case .previews:
@@ -646,6 +765,10 @@ extension Clean {
                 return "Lets you pick runtimes to delete with simctl. Download them again from Xcode to restore."
             case .largeSystemFolders:
                 return "Scans the disk for folders over 5 GB, then lets you tick the safe ones to delete."
+            case .swiftPMCache:
+                return "Deletes SwiftPM's shared cache of package downloads. Packages are fetched again on the next resolve."
+            case .userCaches:
+                return "Lists the folders over 1 GB in ~/Library/Caches and lets you tick which to delete. Apps rebuild them."
             }
         }
 
@@ -682,6 +805,8 @@ extension Clean {
             case .deviceSupport: return "iOS DeviceSupport"
             case .simulatorRuntimes: return "Simulator runtimes"
             case .largeSystemFolders: return "Scan for folders over 5 GB"
+            case .swiftPMCache: return "SwiftPM cache"
+            case .userCaches: return "Caches > 1 GB"
             }
         }
 
@@ -689,9 +814,9 @@ extension Clean {
             switch self {
             case .noDerivedData: return .bulk
             case .derivedData, .previews, .documentationCache, .clonedSimulatorsData,
-                 .homebrewCache, .maestroTests, .claudeJobsTmp:
+                 .homebrewCache, .maestroTests, .claudeJobsTmp, .swiftPMCache:
                 return .safe
-            case .simultorsData, .deviceSupport, .simulatorRuntimes: return .pick
+            case .simultorsData, .deviceSupport, .simulatorRuntimes, .userCaches: return .pick
             case .archives, .trash: return .final
             case .microsoftTeamsCache: return .slow
             case .messagesAttachments, .largeSystemFolders: return .look
@@ -700,12 +825,12 @@ extension Clean {
 
         /// Menu section, in display order: Xcode and iOS first.
         enum Category: Int {
-            case xcodeIOS, developerTools, systemAndApps
+            case xcodeIOS, caches, systemAndApps
 
             var title: String {
                 switch self {
                 case .xcodeIOS: return "Xcode & iOS"
-                case .developerTools: return "Developer tools"
+                case .caches: return "Caches"
                 case .systemAndApps: return "System & apps"
                 }
             }
@@ -716,8 +841,8 @@ extension Clean {
             case .noDerivedData, .derivedData, .archives, .previews, .documentationCache,
                  .deviceSupport, .simulatorRuntimes, .simultorsData, .clonedSimulatorsData:
                 return .xcodeIOS
-            case .homebrewCache, .claudeJobsTmp, .maestroTests:
-                return .developerTools
+            case .homebrewCache, .claudeJobsTmp, .maestroTests, .swiftPMCache, .userCaches:
+                return .caches
             case .trash, .largeSystemFolders, .messagesAttachments, .microsoftTeamsCache:
                 return .systemAndApps
             }
@@ -725,7 +850,8 @@ extension Clean {
 
         /// The user chooses items in a follow-up prompt, so the size shown is a ceiling.
         var picksItemsNext: Bool {
-            self == .simultorsData || self == .deviceSupport || self == .simulatorRuntimes
+            self == .simultorsData || self == .deviceSupport || self == .simulatorRuntimes || self == .userCaches
+                || (self == .derivedData && DerivedDataDiscovery.found.count > 1)
         }
 
         /// What it removes, for the "Deletes" line of the detail box.
@@ -734,7 +860,7 @@ extension Clean {
             case .noDerivedData: return "Everything in the bulk cleanup, except Derived Data"
             case .simultorsData: return "Apps, data and keychains of the simulators you tick"
             case .clonedSimulatorsData: return "~/Library/Developer/XCTestDevices and XCPGDevices"
-            case .derivedData: return "~/Library/Developer/Xcode/DerivedData and Mango's DerivedData"
+            case .derivedData: return "Xcode's own DerivedData, plus any project DerivedData folders you tick"
             case .archives: return "~/Library/Developer/Xcode/Archives"
             case .previews: return "~/Library/Developer/Xcode/UserData/Previews"
             case .messagesAttachments: return "Nothing, it only opens ~/Library/Messages/Attachments"
@@ -747,6 +873,8 @@ extension Clean {
             case .deviceSupport: return "The iOS versions you tick in ~/Library/Developer/Xcode/iOS DeviceSupport"
             case .simulatorRuntimes: return "The runtimes you tick, through simctl"
             case .largeSystemFolders: return "Nothing until you tick folders from the scan"
+            case .swiftPMCache: return "~/Library/Caches/org.swift.swiftpm"
+            case .userCaches: return "The folders over 1 GB in ~/Library/Caches that you tick"
             }
         }
 
@@ -768,6 +896,8 @@ extension Clean {
             case .deviceSupport: return "Yes, when you plug a device in"
             case .simulatorRuntimes: return "Yes, from Xcode > Settings > Components"
             case .largeSystemFolders: return "Depends on what you delete"
+            case .swiftPMCache: return "Yes, packages download again"
+            case .userCaches: return "Yes, apps rebuild their caches; a few may sign you out or re-download data"
             }
         }
 
@@ -775,20 +905,22 @@ extension Clean {
             switch self {
             case .messagesAttachments: return "Nothing to ask, it only opens the folder"
             case .largeSystemFolders: return "Per folder, before anything is removed"
-            case .simultorsData, .deviceSupport, .simulatorRuntimes: return "Per item, before anything is removed"
+            case .simultorsData, .deviceSupport, .simulatorRuntimes, .userCaches: return "Per item, before anything is removed"
+            case .derivedData where DerivedDataDiscovery.found.count > 1: return "Which project folders go too, then a yes/no listing them"
             default: return "One yes/no before it runs, listing what goes"
             }
         }
 
         var runsInAllCleanup: Bool {
             self != .largeSystemFolders && self != .simulatorRuntimes && self != .homebrewCache && self != .deviceSupport && self != .claudeJobsTmp
+                && self != .userCaches
         }
 
         /// Deletes without a prompt of its own. Simulators, DeviceSupport, runtimes and the large-folder scan
         /// ask per item; Messages only opens a folder.
         var needsConfirmation: Bool {
             switch self {
-            case .simultorsData, .deviceSupport, .simulatorRuntimes, .largeSystemFolders, .messagesAttachments:
+            case .simultorsData, .deviceSupport, .simulatorRuntimes, .largeSystemFolders, .messagesAttachments, .userCaches:
                 return false
             default:
                 return true
@@ -829,7 +961,8 @@ extension Clean {
                     "~/Library/Messages/Attachments",
                     "~/Library/Application Support/Microsoft/Teams",
                     "~/.Trash",
-                    "~/.maestro/tests"
+                    "~/.maestro/tests",
+                    "~/Library/Caches/org.swift.swiftpm"
                 ]
             case .simultorsData:
                 return ["~/Library/Developer/CoreSimulator/Devices"]
@@ -839,10 +972,7 @@ extension Clean {
                     "~/Library/Developer/XCPGDevices"
                 ]
             case .derivedData:
-                return [
-                    "~/Library/Developer/Xcode/DerivedData",
-                    "~/Projects/InQBarna/Mango/DerivedData"
-                ]
+                return DerivedDataDiscovery.found
             case .archives:
                 return ["~/Library/Developer/Xcode/Archives"]
             case .previews:
@@ -863,6 +993,10 @@ extension Clean {
                 return Self.claudeJobsTmpPaths
             case .deviceSupport:
                 return [Self.deviceSupportPath]
+            case .swiftPMCache:
+                return ["~/Library/Caches/org.swift.swiftpm"]
+            case .userCaches:
+                return UserCaches.rootFolders()
             case .simulatorRuntimes, .largeSystemFolders:
                 return []
             }
@@ -882,6 +1016,10 @@ extension Clean {
         private static let homebrewBinFolders = ["/opt/homebrew/bin", "/usr/local/bin"]
 
         private static func remove(_ paths: String...) -> Command {
+            remove(paths)
+        }
+
+        static func remove(_ paths: [String]) -> Command {
             Command(executable: "/bin/rm", arguments: ["-rf"] + paths.map(expandTilde))
         }
 
@@ -908,7 +1046,7 @@ extension Clean {
             case .noDerivedData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .simultorsData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .clonedSimulatorsData: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
-            case .derivedData: return Self.remove("~/Library/Developer/Xcode/DerivedData", "~/Projects/InQBarna/Mango/DerivedData")
+            case .derivedData: return Self.remove(DerivedDataDiscovery.found)
             case .archives: return Self.remove("~/Library/Developer/Xcode/Archives")
             case .previews: return Self.remove("~/Library/Developer/Xcode/UserData/Previews")
             case .messagesAttachments: return Command(executable: "/usr/bin/open", arguments: [expandTilde("~/Library/Messages/Attachments")])
@@ -931,6 +1069,8 @@ extension Clean {
             case .deviceSupport: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .simulatorRuntimes: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .largeSystemFolders: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
+            case .swiftPMCache: return Self.remove("~/Library/Caches/org.swift.swiftpm")
+            case .userCaches: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             }
         }
     }
@@ -960,6 +1100,10 @@ private extension Clean {
             case .simulatorRuntimes:
                 bytes = runtimesBytes
                 size = formatStorage(runtimesBytes)
+            case .userCaches:
+                // Only the folders over the minimum are offered, so only they count.
+                bytes = UserCaches.largeFolders(optionInput.estimatedPaths, usages: estimatesByPath).reduce(0) { $0 + $1.usage.bytes }
+                size = formatStorage(bytes)
             default:
                 let estimate = estimatedFreeSpace(for: optionInput, estimatesByPath: estimatesByPath)
                 bytes = estimate.bytes

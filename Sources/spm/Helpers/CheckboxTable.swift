@@ -94,9 +94,12 @@ struct CheckboxTableLayout {
     // MARK: Frame
 
     private func build(_ level: Level, focused: Int, selected: Set<Int>) -> [String] {
-        let width = max(min(size.columns, 120) - 1, 40)
+        // The frame takes 4 columns: border + one space of padding on each side.
+        let outer = max(min(size.columns, 124) - 1, 44)
+        let width = outer - 4
         let sideBySide = width >= sideBySideMinimum
         var out: [String] = []
+        if level.fullQuestion { out.append("") }
 
         if let question = question {
             let questionLines = question.components(separatedBy: .newlines)
@@ -127,8 +130,27 @@ struct CheckboxTableLayout {
             out += inspectorLines(row, width: width - 2, style: level.inspector == .minimal ? .minimal : .compact).map { "  " + $0 }
         }
 
+        if level.fullQuestion { out.append("") }
+        out.append(dim(String(repeating: "─", count: width)))
         out.append(footer(selected, width: width))
-        return out
+        if level.fullQuestion { out.append("") }
+        return framed(out, inner: width)
+    }
+
+    /// Wraps the content in a rounded border with a title in the top edge.
+    private func framed(_ content: [String], inner: Int) -> [String] {
+        let title = " avp clean "
+        let top = dim("╭─") + paint(title, .cyan) + dim(String(repeating: "─", count: max(inner + 1 - title.count, 0)) + "╮")
+        let bottom = dim("╰" + String(repeating: "─", count: inner + 2) + "╯")
+        let body = content.map { line -> String in
+            let padding = String(repeating: " ", count: max(inner - visibleCount(line), 0))
+            return dim("│") + " " + line + padding + " " + dim("│")
+        }
+        return [top] + body + [bottom]
+    }
+
+    private func visibleCount(_ text: String) -> Int {
+        text.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression).count
     }
 
     // MARK: List
@@ -158,7 +180,8 @@ struct CheckboxTableLayout {
 
     private func heading(_ title: String) -> Cell {
         let rule = String(repeating: "─", count: max(listWidth - title.count - 3, 2))
-        return ("  " + paint(title, .cyan) + " " + dim(rule), 2 + title.count + 1 + rule.count)
+        let shown = title.uppercased()
+        return ("  " + paint(shown, .cyan) + " " + dim(rule), 2 + shown.count + 1 + rule.count)
     }
 
     // MARK: Inspector

@@ -240,7 +240,10 @@ final class Prompt {
         var renderedLineCount = 0
 
         guard let rawMode = TerminalRawMode() else { return nil }
+        terminalWasResized = 0
+        signal(SIGWINCH) { _ in terminalWasResized = 1 }
         defer {
+            signal(SIGWINCH, SIG_DFL)
             rawMode.restore()
             writeTerminal("\u{001B}[?25h")
         }
@@ -260,6 +263,14 @@ final class Prompt {
         render()
 
         while true {
+            // Wait for a key, but wake up when the window or font size changes so the layout is redrawn to fit.
+            guard waitForInput(milliseconds: 200) else {
+                if terminalWasResized != 0 {
+                    terminalWasResized = 0
+                    render()
+                }
+                continue
+            }
             switch readTerminalKey() {
             case .up:
                 focusedIndex = focusedIndex == 0 ? count - 1 : focusedIndex - 1
@@ -382,6 +393,15 @@ private final class TerminalRawMode {
         tcsetattr(STDIN_FILENO, TCSANOW, &original)
         restored = true
     }
+}
+
+/// Set by the SIGWINCH handler when the terminal changes size.
+private var terminalWasResized: sig_atomic_t = 0
+
+/// True when a key is waiting on stdin; false after the timeout or when a signal interrupts the wait.
+private func waitForInput(milliseconds: Int32) -> Bool {
+    var descriptor = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
+    return poll(&descriptor, 1, milliseconds) > 0
 }
 
 private func readTerminalKey() -> TerminalKey {
