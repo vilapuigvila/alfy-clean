@@ -9,7 +9,31 @@ import Darwin
 import Foundation
 
 final class TerminalLoader {
-    private let message: String
+    static let thinkingWords = [
+        "Cerebrating", "Cogitating", "Considering", "Contemplating", "Deliberating", "Ideating", "Mulling",
+        "Musing", "Noodling", "Pondering", "Pontificating", "Philosophising", "Ruminating", "Puzzling"
+    ]
+
+    private static let orange = "\u{001B}[38;5;208m"
+
+    private let fixedMessage: String?
+    private let wordInterval: TimeInterval = 3
+    private var word = TerminalLoader.thinkingWords.randomElement() ?? "Thinking"
+    private var wordChangedAt = ProcessInfo.processInfo.systemUptime
+
+    /// "<word> Nope 🤣 - I'm processing my friend", with a new word every few seconds, or the fixed message.
+    private var message: String {
+        fixedMessage ?? "\(word) Nope 🤣 - I'm processing my friend"
+    }
+
+    private var styledMessage: String {
+        guard fixedMessage == nil else { return message }
+        let reset = Print.Color.reset.rawValue
+        let white = Print.Color.white.rawValue
+        return "\(Self.orange)\(word)\(reset) \(white)Nope 🤣 - I'm\(reset) "
+            + "\(Print.Color.green.rawValue)processing\(reset) \(white)my friend\(reset)"
+    }
+
     private let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     private let queue = DispatchQueue(label: "avp.terminal-loader")
     private let isInteractive = isatty(STDOUT_FILENO) != 0
@@ -22,7 +46,12 @@ final class TerminalLoader {
     private var visibleStartedAt: TimeInterval?
 
     init(_ message: String) {
-        self.message = message
+        self.fixedMessage = message
+    }
+
+    /// A loader that cycles through playful words instead of showing a fixed message.
+    init() {
+        self.fixedMessage = nil
     }
 
     func start() {
@@ -46,6 +75,7 @@ final class TerminalLoader {
 
             guard self.isInteractive else { return }
 
+            self.rotateWordIfNeeded()
             self.frameIndex = (self.frameIndex + 1) % self.frames.count
             self.render(frame: self.frames[self.frameIndex], color: .cyan)
         }
@@ -94,8 +124,16 @@ final class TerminalLoader {
         write("\n\u{001B}[?25h")
     }
 
+    private func rotateWordIfNeeded() {
+        guard fixedMessage == nil else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - wordChangedAt >= wordInterval else { return }
+        wordChangedAt = now
+        word = Self.thinkingWords.filter { $0 != word }.randomElement() ?? word
+    }
+
     private func render(frame: String, color: Print.Color) {
-        write("\r\u{001B}[K\(color.rawValue)\(frame)\(Print.Color.reset.rawValue) \(message)")
+        write("\r\u{001B}[K\(color.rawValue)\(frame)\(Print.Color.reset.rawValue) \(styledMessage)")
     }
 
     private func write(_ output: String) {

@@ -62,6 +62,7 @@ struct Clean: ParsableCommand {
             }
         }
 
+        let freeBefore = DerivedDataProjects.freeSpace()
         if optionInputs.contains(.noDerivedData) {
             try deleteAllUnlessDerivedData()
 
@@ -75,6 +76,7 @@ struct Clean: ParsableCommand {
         }
 
         isDone = true
+        printFreedSpace(since: freeBefore)
         try printSystemStorage()
         Print.withColor(.green, "job done! 🍻")
     }
@@ -96,6 +98,7 @@ struct Clean: ParsableCommand {
             return false
         }
 
+        let freeBefore = DerivedDataProjects.freeSpace()
         try deleteSimulatorsData()
         try deleteClonedSimulatorsDataAndUserDefaults()
 
@@ -107,6 +110,7 @@ struct Clean: ParsableCommand {
                 throw error
             }
         }
+        printFreedSpace(since: freeBefore)
         try printSystemStorage()
         return false
     }
@@ -180,7 +184,7 @@ struct Clean: ParsableCommand {
     /// The option's title, followed by the folders it will delete when they are found at runtime.
     private func titleLines(for optionInput: OptionInput) -> [String] {
         guard optionInput == .derivedData else { return [optionInput.title] }
-        return [optionInput.title] + (derivedDataFolders ?? DerivedDataDiscovery.found).map { "    \($0)" }
+        return [optionInput.title] + (derivedDataFolders ?? DerivedDataDiscovery.found).map { "    \($0.terminalSafe)" }
     }
 
     private func bulleted(_ items: [String]) -> String {
@@ -228,33 +232,80 @@ struct Clean: ParsableCommand {
         }
     }
 
-    /// The default Xcode folder is always part of Derived Data. When projects keep their own `DerivedData`
-    /// folders (worktrees, `-derivedDataPath`), the user picks which of those go too.
+    /// What the user can tick in the Derived Data picker.
+    private enum DerivedDataChoice {
+        case project(DerivedDataProject)
+        case sharedCaches(folder: String, paths: [String], bytes: UInt64)
+        case wholeFolder(path: String, bytes: UInt64)
+    }
+
+    /// Shows how much free disk space the cleanup gained (measured, so APFS clones are not double counted).
+    private func printFreedSpace(since before: UInt64?) {
+        guard let before, let after = DerivedDataProjects.freeSpace() else { return }
+        customPrint("")
+        Print.withColor(.green, DerivedDataProjects.freedSpaceMessage(before: before, after: after))
+    }
+
+    /// Per-project rows of Xcode's default folder (biggest first, orphans flagged) plus a shared-caches row
+    /// and any project-local `DerivedData` folder. Nothing is ticked by default; only ticked rows are deleted.
     private func pickDerivedDataFolders() throws -> [String] {
         let defaultFolder = (expandTilde(DerivedDataDiscovery.defaultLocation) as NSString).standardizingPath
         let found = DerivedDataDiscovery.found
-        let others = found.filter { $0 != defaultFolder }
-        let base = found.filter { $0 == defaultFolder }
-        guard !others.isEmpty else { return base }
 
-        var usages: [String: DiskUsage] = [:]
-        try runWithLoader("Measuring other Derived Data folders") {
-            usages = DiskUsage.measure(paths: others)
+        var choices: [DerivedDataChoice] = []
+        try runWithLoader("Measuring Derived Data projects") {
+            let projects = DerivedDataProjects.measured(DerivedDataProjects.projects(in: defaultFolder))
+            let caches = DerivedDataProjects.sharedCaches(in: defaultFolder)
+            let cacheBytes = DiskUsage.measure(paths: caches).values.reduce(UInt64(0)) { $0 + $1.bytes }
+            let others = found.filter { $0 != defaultFolder }
+            let otherUsage = DiskUsage.measure(paths: others)
+            var rows: [(bytes: UInt64, choice: DerivedDataChoice)] = projects.map { ($0.bytes, .project($0)) }
+            if !caches.isEmpty { rows.append((cacheBytes, .sharedCaches(folder: defaultFolder, paths: caches, bytes: cacheBytes))) }
+            for other in others {
+                let bytes = otherUsage[other]?.bytes ?? 0
+                rows.append((bytes, .wholeFolder(path: other, bytes: bytes)))
+            }
+            choices = rows.sorted { $0.bytes > $1.bytes }.map { $0.choice }
         }
-        let sorted = others.sorted { (usages[$0]?.bytes ?? 0) > (usages[$1]?.bytes ?? 0) }
-        let home = NSHomeDirectory()
+        guard !choices.isEmpty else {
+            Print.withColor(.yellow, "No Derived Data projects found.")
+            return []
+        }
 
+        let home = NSHomeDirectory()
+        let dim = Print.Color.dim.rawValue
+        let reset = Print.Color.reset.rawValue
         let selected = Prompt().checkboxOptions(
-            sorted,
-            question: "\n\(Print.Color.boldGreen.rawValue)Other Derived Data folders to delete too\(Print.Color.reset.rawValue)  \(Print.Color.dim.rawValue)Xcode's own folder is always cleaned; leave all unticked to keep these\(Print.Color.reset.rawValue)",
-            label: { folder in
-                let usage = usages[folder] ?? .zero
-                let prefix = usage.isPartial ? "~" : ""
-                let shown = folder.hasPrefix(home + "/") ? "~" + folder.dropFirst(home.count) : folder
-                return "\(shown.terminalSafe)  \(Print.Color.dim.rawValue)\(prefix)\(formatStorage(usage.bytes))\(Print.Color.reset.rawValue)"
+            choices,
+            question: "\n\(Print.Color.boldGreen.rawValue)Derived Data to delete\(reset)  \(dim)Only ticked rows are deleted; orphan = its project no longer exists\(reset)",
+            label: { choice in
+                switch choice {
+                case .project(let project):
+                    let prefix = project.isPartial ? "~" : ""
+                    let flag = project.isOrphan ? "  \(Print.Color.yellow.rawValue)orphan\(reset)" : ""
+                    return "\(project.name.terminalSafe)  \(dim)\(prefix)\(formatStorage(project.bytes))\(reset)\(flag)"
+                case .sharedCaches(_, _, let bytes):
+                    return "Shared caches (module, compilation, SDK)  \(dim)\(formatStorage(bytes))\(reset)"
+                case .wholeFolder(let path, let bytes):
+                    let shown = path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+                    return "\(shown.terminalSafe) (whole folder)  \(dim)\(formatStorage(bytes))\(reset)"
+                }
+            },
+            detail: { choice in
+                if case .project(let project) = choice {
+                    return project.workspacePath.map { "Project: \($0.terminalSafe)" } ?? "Project path unknown (no readable info.plist)"
+                }
+                return nil
             }
         )
-        return base + selected
+        let paths = selected.flatMap { choice -> [String] in
+            switch choice {
+            case .project(let project): return [project.path]
+            case .sharedCaches(_, let paths, _): return paths
+            case .wholeFolder(let path, _): return [path]
+            }
+        }
+        return DerivedDataProjects.deletable(paths, allowedFolders: found)
     }
 
     private func deleteDerivedData(_ folders: [String]) throws {
@@ -778,8 +829,11 @@ extension Clean {
         /// Kept in the code (and reachable with `-d <n>` / `all`) but not offered in the interactive menu.
         var isHiddenInMenu: Bool {
             switch self {
-            case .noDerivedData, .maestroTests, .microsoftTeamsCache, .messagesAttachments, .trash:
+            case .noDerivedData, .microsoftTeamsCache, .messagesAttachments, .trash:
                 return true
+            case .maestroTests:
+                // Only offered when Maestro has left something behind.
+                return !FileManager.default.fileExists(atPath: expandTilde("~/.maestro/tests"))
             default:
                 return false
             }
@@ -842,9 +896,9 @@ extension Clean {
         var category: Category {
             switch self {
             case .noDerivedData, .derivedData, .archives, .previews, .documentationCache,
-                 .deviceSupport, .simulatorRuntimes, .simultorsData, .clonedSimulatorsData:
+                 .deviceSupport, .simulatorRuntimes, .simultorsData, .clonedSimulatorsData, .maestroTests:
                 return .xcodeIOS
-            case .homebrewCache, .claudeJobsTmp, .maestroTests, .swiftPMCache, .userCaches:
+            case .homebrewCache, .claudeJobsTmp, .swiftPMCache, .userCaches:
                 return .caches
             case .trash, .largeSystemFolders, .messagesAttachments, .microsoftTeamsCache:
                 return .systemAndApps
@@ -854,7 +908,7 @@ extension Clean {
         /// The user chooses items in a follow-up prompt, so the size shown is a ceiling.
         var picksItemsNext: Bool {
             self == .simultorsData || self == .deviceSupport || self == .simulatorRuntimes || self == .userCaches
-                || (self == .derivedData && DerivedDataDiscovery.found.count > 1)
+                || self == .derivedData
         }
 
         /// What it removes, for the "Deletes" line of the detail box.
@@ -863,7 +917,7 @@ extension Clean {
             case .noDerivedData: return "Everything in the bulk cleanup, except Derived Data"
             case .simultorsData: return "Apps, data and keychains of the simulators you tick"
             case .clonedSimulatorsData: return "~/Library/Developer/XCTestDevices and XCPGDevices"
-            case .derivedData: return "Xcode's own DerivedData, plus any project DerivedData folders you tick"
+            case .derivedData: return "The DerivedData projects and shared caches you tick (orphans flagged)"
             case .archives: return "~/Library/Developer/Xcode/Archives"
             case .previews: return "~/Library/Developer/Xcode/UserData/Previews"
             case .messagesAttachments: return "Nothing, it only opens ~/Library/Messages/Attachments"
@@ -909,7 +963,7 @@ extension Clean {
             case .messagesAttachments: return "Nothing to ask, it only opens the folder"
             case .largeSystemFolders: return "Per folder, before anything is removed"
             case .simultorsData, .deviceSupport, .simulatorRuntimes, .userCaches: return "Per item, before anything is removed"
-            case .derivedData where DerivedDataDiscovery.found.count > 1: return "Which project folders go too, then a yes/no listing them"
+            case .derivedData: return "Which projects and shared caches go, then a yes/no listing them"
             default: return "One yes/no before it runs, listing what goes"
             }
         }
@@ -1185,7 +1239,7 @@ private extension Clean {
 
     func diskUsageEstimatesByPath() -> [String: DiskUsageEstimate] {
         let uniquePaths = Array(Set(OptionInput.menuOptions.flatMap { $0.estimatedPaths }))
-        let loader = TerminalLoader("Measuring folder sizes (this may take a minute)")
+        let loader = TerminalLoader()
         loader.start()
         let result = DiskUsage.measure(paths: uniquePaths)
         loader.succeed()
