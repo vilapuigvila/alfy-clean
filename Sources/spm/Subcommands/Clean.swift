@@ -215,6 +215,9 @@ struct Clean: ParsableCommand {
                !FileManager.default.fileExists(atPath: required) {
                 break
             }
+            if optionInput == .trash, Self.isTrashUnreadable {
+                throw Self.trashAccessMessage
+            }
             try runWithLoader("Cleaning \(optionInput.title)") {
                 let result = runProcess(command.executable, command.arguments, searchPath: command.searchPath)
                 if !result.success {
@@ -775,7 +778,7 @@ extension Clean {
         /// Kept in the code (and reachable with `-d <n>` / `all`) but not offered in the interactive menu.
         var isHiddenInMenu: Bool {
             switch self {
-            case .noDerivedData, .maestroTests, .microsoftTeamsCache, .messagesAttachments:
+            case .noDerivedData, .maestroTests, .microsoftTeamsCache, .messagesAttachments, .trash:
                 return true
             default:
                 return false
@@ -1079,6 +1082,14 @@ extension Clean {
 // MARK: Text descriptions -
 
 private extension Clean {
+    static let trashAccessMessage = "Can't read ~/.Trash: give your terminal Full Disk Access (System Settings > Privacy & Security > Full Disk Access) and try again"
+
+    static var isTrashUnreadable: Bool {
+        let path = expandTilde("~/.Trash")
+        return FileManager.default.fileExists(atPath: path)
+            && (try? FileManager.default.contentsOfDirectory(atPath: path)) == nil
+    }
+
     struct MenuEntry {
         let input: OptionInput
         let row: CheckboxTableRow
@@ -1104,6 +1115,9 @@ private extension Clean {
                 // Only the folders over the minimum are offered, so only they count.
                 bytes = UserCaches.largeFolders(optionInput.estimatedPaths, usages: estimatesByPath).reduce(0) { $0 + $1.usage.bytes }
                 size = formatStorage(bytes)
+            case .trash where Self.isTrashUnreadable:
+                // macOS blocks ~/.Trash without Full Disk Access; "0 MB" would be misleading.
+                size = "no access"
             default:
                 let estimate = estimatedFreeSpace(for: optionInput, estimatesByPath: estimatesByPath)
                 bytes = estimate.bytes
