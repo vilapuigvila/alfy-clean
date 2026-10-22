@@ -46,11 +46,23 @@ struct Clean: ParsableCommand {
             return
         }
 
+        // The interactive menu comes back after each job, until it is left empty (Esc / q).
+        // `-d <n>` is a one-shot, so it runs once.
+        let isInteractive = delete == nil
+        repeat {
+            derivedDataFolders = nil
+            guard try runMenuJob() else { return }
+        } while isInteractive
+    }
+
+    /// One pass of menu → confirm → clean. False when nothing ran (nothing picked, or declined).
+    private mutating func runMenuJob() throws -> Bool {
+
         let optionInputs = try pickOptions()
 
         if optionInputs.isEmpty {
             Print.withColor(.yellow, "Cancelled.")
-            return
+            return false
         }
 
         let needConfirmation = optionInputs.filter { $0.needsConfirmation }
@@ -58,7 +70,7 @@ struct Clean: ParsableCommand {
             let confirmDelete = Prompt().yesNo("⚠️  This permanently deletes:\n\(bulleted(deletionItems(for: needConfirmation)))\nContinue?")
             if !confirmDelete {
                 Print.withColor(.yellow, "Cancelled.")
-                return
+                return false
             }
         }
 
@@ -79,6 +91,7 @@ struct Clean: ParsableCommand {
         printFreedSpace(since: freeBefore)
         try printSystemStorage()
         Print.withColor(.green, "job done! 🍻")
+        return true
     }
     
     // MARK: helpers -
@@ -766,7 +779,7 @@ extension Clean {
             case .derivedData: return "🔥 🧨 Derived Data"
             case .noDerivedData: return "🥳 All, -> derived data excluded"
             case .simultorsData: return "⚠️  Erase simulators (apps, logins, keychains)"
-            case .clonedSimulatorsData: return "Cloned simulators (tests & Playgrounds)"
+            case .clonedSimulatorsData: return "Delete cloned simulators (tests & Playgrounds)"
             case .archives: return "⚠️  Archives (.xcarchive & dSYMs, not recoverable)"
             case .previews: return "Previews"
             case .messagesAttachments: return "📩 Open Messages Attachments folder"
@@ -848,7 +861,7 @@ extension Clean {
             switch self {
             case .noDerivedData: return "All except Derived Data"
             case .simultorsData: return "Erase simulators"
-            case .clonedSimulatorsData: return "Cloned simulators"
+            case .clonedSimulatorsData: return "Delete cloned sims"
             case .derivedData: return "Derived Data"
             case .archives: return "Archives"
             case .previews: return "Previews"
