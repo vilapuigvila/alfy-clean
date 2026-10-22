@@ -1241,7 +1241,10 @@ private extension Clean {
         let uniquePaths = Array(Set(OptionInput.menuOptions.flatMap { $0.estimatedPaths }))
         let loader = TerminalLoader()
         loader.start()
-        let result = DiskUsage.measure(paths: uniquePaths)
+        // Cloned simulators share blocks with their source device: count only what deleting them frees.
+        let cloned = uniquePaths.filter { DiskUsage.cloneFolders.contains($0) }
+        var result = DiskUsage.measure(paths: uniquePaths.filter { !cloned.contains($0) })
+        result.merge(DiskUsage.measureReclaimable(paths: cloned)) { _, reclaimable in reclaimable }
         loader.succeed()
         return result
     }
