@@ -35,7 +35,7 @@ final class TerminalLoader {
     }
 
     private let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    private let queue = DispatchQueue(label: "avp.terminal-loader")
+    private let queue = DispatchQueue(label: "alfy-clean.terminal-loader")
     private let isInteractive = isatty(STDOUT_FILENO) != 0
     private let displayDelay: TimeInterval = 1
     private let minimumVisibleDuration: TimeInterval = 1.5

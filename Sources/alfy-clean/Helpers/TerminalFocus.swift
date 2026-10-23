@@ -1,7 +1,7 @@
 //
 //  TerminalFocus.swift
 //
-//  Remembers which terminal tab ran avp, so tapping a notification can bring that exact tab back.
+//  Remembers which terminal tab ran alfy-clean, so tapping a notification can bring that exact tab back.
 //  Only Ghostty is supported (through its AppleScript dictionary); other terminals just get their app activated.
 //
 
@@ -12,7 +12,7 @@ enum TerminalFocus {
     private static var ghosttyTerminalID: String?
 
     /// Records the focused Ghostty terminal. Call at startup: the user has just typed the command,
-    /// so the terminal that ran avp is still the focused one. Does nothing outside Ghostty, or if
+    /// so the terminal that ran alfy-clean is still the focused one. Does nothing outside Ghostty, or if
     /// scripting is refused (macOS asks for Automation permission the first time).
     static func captureCurrentTerminal() {
         guard ProcessInfo.processInfo.environment["__CFBundleIdentifier"] == ghosttyBundleID else { return }

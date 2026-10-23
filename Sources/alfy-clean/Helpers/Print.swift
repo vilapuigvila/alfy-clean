@@ -44,7 +44,7 @@ struct Print {
 
 extension String {
     /// Control characters (C0, DEL, C1) replaced with "?", so a crafted file or simulator name can't move
-    /// the cursor, recolor or rewrite what the terminal shows. Use on any name that didn't come from avp.
+    /// the cursor, recolor or rewrite what the terminal shows. Use on any name that didn't come from alfy-clean.
     var terminalSafe: String {
         var result = String.UnicodeScalarView()
         for scalar in unicodeScalars {

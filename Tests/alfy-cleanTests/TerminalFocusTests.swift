@@ -1,5 +1,5 @@
 import XCTest
-@testable import avp
+@testable import alfy_clean
 
 final class TerminalFocusTests: XCTestCase {
     func testAcceptsGhosttyTerminalIDs() {

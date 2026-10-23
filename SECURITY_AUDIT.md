@@ -1,4 +1,4 @@
-# avp security audit
+# alfy-clean security audit
 
 Date: 2026-10-15 · Branch: `development` (working tree after the Pusher removal) · Scope: every file under
 `Sources/`, `Tests/`, `Package.swift`, `Package.resolved`, `.gitignore`, `.claude/settings.local.json`, and the
@@ -6,14 +6,14 @@ full git history (all branches, pushed to the `origin` GitLab remote).
 
 ## Threat model
 
-`avp` is a single-user macOS CLI that deletes files and runs shell commands as the user who launches it. There is
+`alfy-clean` is a single-user macOS CLI that deletes files and runs shell commands as the user who launches it. There is
 no network code left and no privilege elevation. So the realistic risks are:
 
-1. **Deleting the wrong thing**: a bug, a misleading prompt, or a crafted path makes `avp` remove user data.
+1. **Deleting the wrong thing**: a bug, a misleading prompt, or a crafted path makes `alfy-clean` remove user data.
 2. **Running the wrong program**: a command string or a `PATH` lookup gets subverted.
 3. **Leaked secrets**: credentials in the repo or its history.
 4. **Untrusted text**: file or simulator names shown in the terminal.
-5. **An AI agent driving `avp`**: Claude Code permission rules stored in this repo.
+5. **An AI agent driving `alfy-clean`**: Claude Code permission rules stored in this repo.
 
 Severity is rated for this context (personal tool on a single-user Mac). Nothing rates High.
 
@@ -37,7 +37,7 @@ Severity is rated for this context (personal tool on a single-user Mac). Nothing
 ## M1. Claude Code allow-rules allow arbitrary commands
 
 **Status: fixed.** The allow list is now exact commands only: `swift --version`, `swift build`,
-`swift build -c release`, `swift test`, `swift test --filter avpTests/testExample`, `swift run avp --version`, and the
+`swift build -c release`, `swift test`, `swift test --filter alfyCleanTests/testExample`, `swift run alfy-clean --version`, and the
 read-only `du`. There are no wildcards and no awk, sort or head rules.
 
 **Where:** `.claude/settings.local.json` lines 7–17 (untracked, but active for every Claude session in this folder).
@@ -46,7 +46,7 @@ read-only `du`. There are no wildcards and no awk, sort or head rules.
 - `Bash(/usr/bin/awk '$1 >= 5242880 { *)` and `Bash(/usr/bin/awk 'BEGIN { FS=... } $1 >= 5242880 { *)` end in a
   wildcard inside the awk program. awk has `system("…")`, so a command matching that prefix can run any shell
   command without asking.
-- `Bash(swift run *)` lets an agent run `swift run avp clean -d 9`, which empties the Trash with no prompt at all
+- `Bash(swift run *)` lets an agent run `swift run alfy-clean clean -d 9`, which empties the Trash with no prompt at all
   (see M2). It also allows `swift run --package-path <anywhere>`, which builds and runs code from another folder.
 - `Bash(swift build *)` / `Bash(swift test *)` likewise accept `--package-path` to other packages.
 
@@ -54,7 +54,7 @@ read-only `du`. There are no wildcards and no awk, sort or head rules.
 arbitrary command without a permission prompt.
 
 **Fix:** delete the four awk rules and the `sort`/`head` rules (they are left over from an old scan threshold,
-`5242880`, which the code no longer uses). Narrow `swift run *` to `swift run avp --version` or remove it, and keep
+`5242880`, which the code no longer uses). Narrow `swift run *` to `swift run alfy-clean --version` or remove it, and keep
 `swift build`/`swift test` without a trailing wildcard.
 
 ## M2. Irreversible deletions without a fitting confirmation
@@ -74,7 +74,7 @@ Trash are still part of `all`; they're now named in its prompt.
   (`rm -rf ~/Library/Application Support/Microsoft/Teams`, which is the whole app-data folder, not only its
   cache: settings and sign-in included), 5 Previews, 8 Documentation cache, 10 Homebrew, 11 Maestro,
   12 Claude jobs tmp.
-- `avp clean all` asks once: *"This will erase simulator data, keychains, and caches."* It then also deletes
+- `alfy-clean clean all` asks once: *"This will erase simulator data, keychains, and caches."* It then also deletes
   **Archives** (your `.xcarchive`s, including the dSYMs needed to symbolicate crash reports for shipped
   builds) and **empties the Trash**. Neither is mentioned, and neither can be undone.
 
@@ -91,7 +91,7 @@ DeviceSupport. Narrow Teams to its cache subfolders, or retitle the option "Team
 **Status: fixed.** `SystemScanner.isSafeToDeleteNow` runs right before each delete and when the checklist is built.
 It requires the allowlist match, `realpath(path) == path` (so no component is a symlink and the folder still
 exists), and, under `/private/tmp/claude-<uid>/`, that the root is a directory owned by you and not group- or
-world-writable. Covered by `Tests/spmTests/SecurityChecksTests.swift`.
+world-writable. Covered by `Tests/alfy-cleanTests/SecurityChecksTests.swift`.
 
 Not changed:
 - A window of microseconds remains between the check and `removeItem`. Closing it fully needs `openat`/`unlinkat`
@@ -138,7 +138,7 @@ scan no longer uses a shell pipeline: `du`, then `awk` fed through stdin, then t
   exploitable. But any future value that contains a space, `;`, `$(…)` or a quote becomes shell syntax.
 - `rm`, `find`, `xcrun`, `open` and `brew` are found through the inherited `PATH`. Yours puts user-writable folders
   first (`~/.local/bin`, `/opt/homebrew/...`, the node and rbenv shims). Any tool that drops an `rm` or `xcrun`
-  there gets run by every `avp` cleanup. zsh also sources `/etc/zshenv` and `~/.zshenv` on every `-c` call (you
+  there gets run by every `alfy-clean` cleanup. zsh also sources `/etc/zshenv` and `~/.zshenv` on every `-c` call (you
   have no `~/.zshenv` today).
 
 **Fix:** follow the pattern `DiskUsage.measure` already uses: `Process` with an absolute `executableURL`
@@ -158,7 +158,7 @@ title, so this is safe. A future message that includes a folder or simulator nam
 the string, and AppleScript can run `do shell script`.
 
 **Fix:** pass the text as an argument instead:
-`osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "avp" sound name "Glass"' -e 'end run' <message>`.
+`osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "alfy-clean" sound name "Glass"' -e 'end run' <message>`.
 
 ## L3. Untrusted names printed raw
 
@@ -202,7 +202,7 @@ your client or employer policy.
 2. Only if policy requires it: rewrite history (`git filter-repo` to drop `Pusher.swift`'s history) and
    force-push both branches. That is destructive and changes every commit hash, so it needs your go-ahead.
 
-No cached token is left in `defaults` (checked: no `authToken` key in the `avp` domain).
+No cached token is left in `defaults` (checked: no `authToken` key in the `alfy-clean` domain).
 
 ## L5. No guard against running as root
 
@@ -212,7 +212,7 @@ No cached token is left in `defaults` (checked: no `authToken` key in the `avp` 
 on how sudo sets `HOME`. Then `rm -rf ~/…` and the allowlist base point at different trees, and
 `simctl erase all` runs as root.
 
-**Fix:** at startup, `guard getuid() != 0 else { throw "Don't run avp with sudo" }`.
+**Fix:** at startup, `guard getuid() != 0 else { throw "Don't run alfy-clean with sudo" }`.
 
 ## L6. Old, capped dependency
 
@@ -234,7 +234,7 @@ and a large output can't deadlock. Tests cover 300 KB of output and 500 KB of in
 **Where:** `Global.swift:24-28`.
 
 **What:** it calls `waitUntilExit()` *before* reading the pipe. If a command writes more than the pipe buffer
-(64 KB), the child blocks and `avp` hangs forever. `simctl list devices -j` is 12 KB here, so about five times more
+(64 KB), the child blocks and `alfy-clean` hangs forever. `simctl list devices -j` is 12 KB here, so about five times more
 simulators would trigger it. The deprecated `launch()` also raises an Objective-C exception (crash) instead of a
 Swift error if the launch fails.
 

@@ -56,7 +56,7 @@ func runProcess(
     }
 
     if let input = input, let inputPipe = inputPipe {
-        // A child that exits early closes the pipe; that must not kill avp with SIGPIPE.
+        // A child that exits early closes the pipe; that must not kill alfy-clean with SIGPIPE.
         signal(SIGPIPE, SIG_IGN)
         // Written off the main thread so a large input can't deadlock against the output we read below.
         DispatchQueue.global().async {

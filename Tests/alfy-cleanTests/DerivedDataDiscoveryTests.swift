@@ -1,12 +1,12 @@
 import XCTest
-@testable import avp
+@testable import alfy_clean
 
 final class DerivedDataDiscoveryTests: XCTestCase {
     private var root: String!
     private let fm = FileManager.default
 
     override func setUpWithError() throws {
-        root = NSHomeDirectory() + "/Library/Caches/avp-tests-\(UUID().uuidString)"
+        root = NSHomeDirectory() + "/Library/Caches/alfy-clean-tests-\(UUID().uuidString)"
         try fm.createDirectory(atPath: root, withIntermediateDirectories: true)
     }
 

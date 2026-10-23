@@ -1,5 +1,5 @@
 import XCTest
-@testable import avp
+@testable import alfy_clean
 
 final class UserCachesTests: XCTestCase {
     private var root: String!
@@ -7,7 +7,7 @@ final class UserCachesTests: XCTestCase {
 
     override func setUpWithError() throws {
         // Scratch "Caches" folder under the real one: never touches real cache folders.
-        root = NSHomeDirectory() + "/Library/Caches/avp-tests-\(UUID().uuidString)"
+        root = NSHomeDirectory() + "/Library/Caches/alfy-clean-tests-\(UUID().uuidString)"
         for name in ["BigApp", "SmallApp", "org.swift.swiftpm", "Homebrew"] {
             try fm.createDirectory(atPath: root + "/" + name, withIntermediateDirectories: true)
         }

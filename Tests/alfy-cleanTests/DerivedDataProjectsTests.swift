@@ -1,12 +1,12 @@
 import XCTest
-@testable import avp
+@testable import alfy_clean
 
 final class DerivedDataProjectsTests: XCTestCase {
     private var root: String!
     private let fm = FileManager.default
 
     override func setUpWithError() throws {
-        root = NSTemporaryDirectory() + "avp-ddp-\(UUID().uuidString)"
+        root = NSTemporaryDirectory() + "alfy-clean-ddp-\(UUID().uuidString)"
         try fm.createDirectory(atPath: root, withIntermediateDirectories: true)
     }
 
@@ -72,7 +72,7 @@ final class DerivedDataProjectsTests: XCTestCase {
 
     func testDeletableOnlyDirectChildrenOfAllowedFolders() throws {
         let project = try makeProject("App-\(suffix)", plist: nil)
-        let outside = NSTemporaryDirectory() + "avp-outside-\(UUID().uuidString)"
+        let outside = NSTemporaryDirectory() + "alfy-clean-outside-\(UUID().uuidString)"
         try fm.createDirectory(atPath: outside, withIntermediateDirectories: true)
         defer { try? fm.removeItem(atPath: outside) }
         let link = root + "/Link-\(suffix)"

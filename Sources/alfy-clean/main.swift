@@ -14,10 +14,10 @@ struct Constant {
   }
 }
 
-struct Avp: ParsableCommand {
+struct AlfyClean: ParsableCommand {
   public static let configuration = CommandConfiguration(
-    abstract: "avp helper",
-    version: "avp version \(Constant.App.version)",
+    abstract: "alfy-clean helper",
+    version: "alfy-clean version \(Constant.App.version)",
     subcommands: [
         Cache.self, Clean.self, WorktreeClean.self
     ]
@@ -26,4 +26,4 @@ struct Avp: ParsableCommand {
 
 // MARK: Run Main program -
 
-Avp.main()
+AlfyClean.main()

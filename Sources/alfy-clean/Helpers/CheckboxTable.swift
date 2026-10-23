@@ -139,7 +139,7 @@ struct CheckboxTableLayout {
 
     /// Wraps the content in a rounded border with a title in the top edge.
     private func framed(_ content: [String], inner: Int) -> [String] {
-        let title = " avp clean "
+        let title = " alfy-clean clean "
         let top = dim("╭─") + paint(title, .cyan) + dim(String(repeating: "─", count: max(inner + 1 - title.count, 0)) + "╮")
         let bottom = dim("╰" + String(repeating: "─", count: inner + 2) + "╯")
         let body = content.map { line -> String in

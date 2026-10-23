@@ -1,5 +1,5 @@
 import XCTest
-@testable import avp
+@testable import alfy_clean
 
 /// Regression tests for SECURITY_AUDIT.md L1 (no shell, fixed PATH) and L7 (large output, launch failure).
 final class ProcessRunnerTests: XCTestCase {
@@ -54,7 +54,7 @@ final class ProcessRunnerTests: XCTestCase {
     }
 
     func testScanOutputIsSortedAndFormatted() throws {
-        try XCTSkipIf(ProcessInfo.processInfo.environment["AVP_SLOW_TESTS"] == nil, "full disk scan; set AVP_SLOW_TESTS=1")
+        try XCTSkipIf(ProcessInfo.processInfo.environment["ALFY_CLEAN_SLOW_TESTS"] == nil, "full disk scan; set ALFY_CLEAN_SLOW_TESTS=1")
         let lines = SystemScanner.listLargeFolders().split(separator: "\n").map(String.init)
         XCTAssertLessThanOrEqual(lines.count, 50)
         let sizes = lines.compactMap { line -> Double? in
@@ -68,7 +68,7 @@ final class ProcessRunnerTests: XCTestCase {
     /// Runs the real delete commands against a scratch folder (the built-in ones always target `~`).
     func testEmptyFolderAndJobTmpCommandsDeleteOnlyWhatTheyShould() throws {
         let fm = FileManager.default
-        let root = NSHomeDirectory() + "/Library/Caches/avp-tests-\(UUID().uuidString)"
+        let root = NSHomeDirectory() + "/Library/Caches/alfy-clean-tests-\(UUID().uuidString)"
         defer { try? fm.removeItem(atPath: root) }
 
         // A "Trash" with a file, a folder with a space in its name, and a hidden file.

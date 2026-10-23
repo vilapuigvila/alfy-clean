@@ -1,5 +1,5 @@
 import XCTest
-@testable import avp
+@testable import alfy_clean
 
 /// Regression tests for SECURITY_AUDIT.md M3 (symlink swap before delete) and L3 (terminal control characters).
 final class SecurityChecksTests: XCTestCase {
@@ -7,7 +7,7 @@ final class SecurityChecksTests: XCTestCase {
 
     override func setUpWithError() throws {
         // Under $HOME with a DerivedData component, so the paths are on the safe-to-delete allowlist.
-        root = NSHomeDirectory() + "/Library/Caches/avp-tests-\(UUID().uuidString)"
+        root = NSHomeDirectory() + "/Library/Caches/alfy-clean-tests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: root + "/real/DerivedData/Build", withIntermediateDirectories: true)
     }
 

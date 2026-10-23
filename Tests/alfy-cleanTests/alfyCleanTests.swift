@@ -1,7 +1,7 @@
 import XCTest
 import class Foundation.Bundle
 
-final class avpTests: XCTestCase {
+final class alfyCleanTests: XCTestCase {
     func testExample() throws {
         // This is an example of a functional test case.
         // Use XCTAssert and related functions to verify your tests produce the correct
@@ -15,7 +15,7 @@ final class avpTests: XCTestCase {
         // Mac Catalyst won't have `Process`, but it is supported for executables.
         #if !targetEnvironment(macCatalyst)
 
-        let fooBinary = productsDirectory.appendingPathComponent("avp")
+        let fooBinary = productsDirectory.appendingPathComponent("alfy-clean")
 
         let process = Process()
         process.executableURL = fooBinary
@@ -30,7 +30,7 @@ final class avpTests: XCTestCase {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let output = String(data: data, encoding: .utf8)
 
-        XCTAssertEqual(output, "avp version 0.0.2\n")
+        XCTAssertEqual(output, "alfy-clean version 0.0.2\n")
         #endif
     }
 

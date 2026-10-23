@@ -4,7 +4,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "avp",
+    name: "alfy-clean",
     platforms: [
         .macOS(.v12),
     ],
@@ -13,14 +13,14 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "avp",
+            name: "alfy-clean",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
-            path: "Sources/spm"),
+            path: "Sources/alfy-clean"),
         .testTarget(
-            name: "avpTests",
-            dependencies: ["avp"],
-            path: "Tests/spmTests"),
+            name: "alfy-cleanTests",
+            dependencies: ["alfy-clean"],
+            path: "Tests/alfy-cleanTests"),
     ]
 )

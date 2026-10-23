@@ -32,7 +32,7 @@ struct DiskUsage {
         let expandedPaths = expandedToOriginal.keys.sorted()
         guard !expandedPaths.isEmpty else { return result }
 
-        let errorFile = NSTemporaryDirectory() + "avp-du-\(UUID().uuidString).err"
+        let errorFile = NSTemporaryDirectory() + "alfy-clean-du-\(UUID().uuidString).err"
         FileManager.default.createFile(atPath: errorFile, contents: nil)
         defer { try? FileManager.default.removeItem(atPath: errorFile) }
 

@@ -8,7 +8,7 @@
 import Darwin
 import Foundation
 
-class AVPTimer: NSObject {
+class AlfyCleanTimer: NSObject {
     private var runCount: Int = 0
     private(set) var timer: Timer?
     

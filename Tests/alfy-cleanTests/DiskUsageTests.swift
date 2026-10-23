@@ -1,5 +1,5 @@
 import XCTest
-@testable import avp
+@testable import alfy_clean
 
 final class DiskUsageTests: XCTestCase {
     private var root: String!
@@ -8,7 +8,7 @@ final class DiskUsageTests: XCTestCase {
 
     override func setUpWithError() throws {
         // Under the home folder (APFS), never the real simulator folders.
-        root = NSHomeDirectory() + "/Library/Caches/avp-tests-\(UUID().uuidString)"
+        root = NSHomeDirectory() + "/Library/Caches/alfy-clean-tests-\(UUID().uuidString)"
         try fm.createDirectory(atPath: root + "/source", withIntermediateDirectories: true)
         // Random bytes: APFS can't compress or sparsify them.
         let data = Data((0..<size).map { _ in UInt8.random(in: 0...255) })

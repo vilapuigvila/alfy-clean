@@ -691,7 +691,7 @@ struct Clean: ParsableCommand {
     ]
 
     /// Sends a macOS system notification with a custom message and sound.
-    /// Prefers terminal-notifier so tapping the notification returns to the terminal that ran avp: the app
+    /// Prefers terminal-notifier so tapping the notification returns to the terminal that ran alfy-clean: the app
     /// (its bundle ID comes from `__CFBundleIdentifier`) and, in Ghostty, the exact tab (see `TerminalFocus`); falls back to osascript, whose notifications
     /// open Script Editor on tap.
     /// Returns immediately without waiting for user interaction.
@@ -699,11 +699,11 @@ struct Clean: ParsableCommand {
     /// since notifications are non-critical to the main task.
     private func sendNotification(message: String) {
         if let notifier = Self.terminalNotifierPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            var arguments = ["-title", "avp", "-message", message, "-sound", "Glass"]
+            var arguments = ["-title", "alfy-clean", "-message", message, "-sound", "Glass"]
             if let terminalBundleID = ProcessInfo.processInfo.environment["__CFBundleIdentifier"] {
                 arguments += ["-activate", terminalBundleID]
             }
-            // Tapping it returns to the exact terminal tab that ran avp, not just the terminal app.
+            // Tapping it returns to the exact terminal tab that ran alfy-clean, not just the terminal app.
             if let focusCommand = TerminalFocus.clickCommand {
                 arguments += ["-execute", focusCommand]
             }
@@ -712,7 +712,7 @@ struct Clean: ParsableCommand {
             // The message is passed as an argument to the script, never spliced into its source.
             runProcess("/usr/bin/osascript", [
                 "-e", "on run argv",
-                "-e", "display notification (item 1 of argv) with title \"avp\" sound name \"Glass\"",
+                "-e", "display notification (item 1 of argv) with title \"alfy-clean\" sound name \"Glass\"",
                 "-e", "end run",
                 message
             ])

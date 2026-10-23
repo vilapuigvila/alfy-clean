@@ -1,6 +1,6 @@
 import Foundation
 
-/// One project folder inside a DerivedData folder (`<Name>-<hash>`), as shown in the `avp clean` picker.
+/// One project folder inside a DerivedData folder (`<Name>-<hash>`), as shown in the `alfy-clean clean` picker.
 struct DerivedDataProject: Equatable {
     let path: String
     /// The project or workspace Xcode built, from `info.plist`; nil when the plist is missing or unreadable.

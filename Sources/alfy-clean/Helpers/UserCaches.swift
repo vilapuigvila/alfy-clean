@@ -1,6 +1,6 @@
 import Foundation
 
-/// The big folders directly inside `~/Library/Caches`, offered one by one in `avp clean`.
+/// The big folders directly inside `~/Library/Caches`, offered one by one in `alfy-clean clean`.
 /// Only direct children are ever listed or deleted, and never a symlink, so a swapped-in link
 /// can't redirect a delete somewhere else.
 enum UserCaches {
