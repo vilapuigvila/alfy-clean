@@ -7,7 +7,7 @@
 import Foundation
 
 struct SystemScanner {
-    /// Scans system folders for directories larger than 5GB, removes parent folders, and returns formatted output.
+    /// Scans system folders for directories larger than 3GB, removes parent folders, and returns formatted output.
     /// Returns empty string if scan fails.
     static func listLargeFolders() -> String {
         let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
@@ -56,7 +56,7 @@ struct SystemScanner {
     ]
 
     /// awk script run over `du -k` output: drops excluded folders, subtracts their size from parents, and
-    /// filters out parent folders when a child folder > 5GB exists in the result set. Prints "<kilobytes> <path>".
+    /// filters out parent folders when a child folder > 3GB exists in the result set. Prints "<kilobytes> <path>".
     /// Sorting and the top-50 cut happen in Swift (see `listLargeFolders`).
     private static let awkProgram = """
           BEGIN { FS="\\t"; OFS=" "; n = split(excluded, ex, "|") } {
@@ -90,7 +90,7 @@ struct SystemScanner {
             for (e in excludedSize) {
               if (index(e, paths[k] "/") == 1) size -= excludedSize[e]
             }
-            if (size < 4882813) continue
+            if (size < 2929688) continue
             kept++
             keptPath[kept] = paths[k]
             keptSize[kept] = size

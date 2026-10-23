@@ -541,13 +541,13 @@ struct Clean: ParsableCommand {
     private func listLargeSystemFolders() throws {
         var output = ""
 
-        try runWithLoader("Scanning system folders larger than 5 GB (this may take a moment)") {
+        try runWithLoader("Scanning system folders larger than 3 GB (this may take a moment)") {
             output = SystemScanner.listLargeFolders()
         }
 
-        Print.withColor(.boldGreen, "Deepest folders larger than 5 GB")
+        Print.withColor(.boldGreen, "Deepest folders larger than 3 GB")
         if output.isEmpty {
-            Print.withColor(.yellow, "No folders larger than 5 GB found in scanned locations.")
+            Print.withColor(.yellow, "No folders larger than 3 GB found in scanned locations.")
         } else {
             Print.withColor(.cyan, "Showing largest 50 deepest folders (parent folders excluded):\n")
             customPrint(output.components(separatedBy: "\n").map { $0.terminalSafe }.joined(separator: "\n"))
@@ -791,7 +791,7 @@ extension Clean {
             case .claudeJobsTmp: return "🤖 Claude Code jobs tmp folders"
             case .deviceSupport: return "📱 iOS DeviceSupport versions"
             case .simulatorRuntimes: return "📦 Simulator runtimes"
-            case .largeSystemFolders: return "🔎 List system folders > 5 GB"
+            case .largeSystemFolders: return "🔎 List system folders > 3 GB"
             case .swiftPMCache: return "📦 SwiftPM cache"
             case .userCaches: return "🗂️ Big folders in ~/Library/Caches"
             }
@@ -831,7 +831,7 @@ extension Clean {
             case .simulatorRuntimes:
                 return "Lets you pick runtimes to delete with simctl. Download them again from Xcode to restore."
             case .largeSystemFolders:
-                return "Scans the disk for folders over 5 GB, then lets you tick the safe ones to delete."
+                return "Scans the disk for folders over 3 GB, then lets you tick the safe ones to delete."
             case .swiftPMCache:
                 return "Deletes SwiftPM's shared cache of package downloads. Packages are fetched again on the next resolve."
             case .userCaches:
@@ -874,7 +874,7 @@ extension Clean {
             case .claudeJobsTmp: return "Claude Code jobs tmp"
             case .deviceSupport: return "iOS DeviceSupport"
             case .simulatorRuntimes: return "Simulator runtimes"
-            case .largeSystemFolders: return "Scan for folders over 5 GB"
+            case .largeSystemFolders: return "Scan for folders over 3 GB"
             case .swiftPMCache: return "SwiftPM cache"
             case .userCaches: return "Caches > 1 GB"
             }
