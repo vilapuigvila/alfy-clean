@@ -65,24 +65,6 @@ enum DerivedDataProjects {
         }.sorted { $0.bytes > $1.bytes }
     }
 
-    /// True when `path` is `root` or sits inside it. Compares whole path components, so `/a/wt-other`
-    /// is not inside `/a/wt`.
-    static func isInside(_ path: String, root: String) -> Bool {
-        let path = (path as NSString).standardizingPath
-        let root = (root as NSString).standardizingPath
-        guard root != "/", !root.isEmpty else { return false }
-        return path == root || path.hasPrefix(root + "/")
-    }
-
-    /// Projects whose `WorkspacePath` is inside `root` (also tried with `root` resolved through symlinks).
-    static func projects(_ projects: [DerivedDataProject], inside root: String) -> [DerivedDataProject] {
-        let resolved = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
-        return projects.filter { project in
-            guard let workspace = project.workspacePath else { return false }
-            return isInside(workspace, root: root) || isInside(workspace, root: resolved)
-        }
-    }
-
     /// Keeps only paths that are safe to delete: a direct child of one of `allowedFolders` (never a symlink)
     /// or one of those folders themselves.
     static func deletable(_ paths: [String], allowedFolders: [String]) -> [String] {

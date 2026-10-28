@@ -90,19 +90,4 @@ final class DerivedDataProjectsTests: XCTestCase {
         XCTAssertTrue(DerivedDataProjects.freedSpaceMessage(before: 5, after: 5).hasPrefix("No change"))
         XCTAssertTrue(DerivedDataProjects.freedSpaceMessage(before: 3_000_000_000, after: 1_000_000_000).hasPrefix("No space freed"))
     }
-
-    func testWorktreePathMatching() {
-        XCTAssertTrue(DerivedDataProjects.isInside("/a/wt/App.xcworkspace", root: "/a/wt"))
-        XCTAssertTrue(DerivedDataProjects.isInside("/a/wt", root: "/a/wt/"))
-        XCTAssertFalse(DerivedDataProjects.isInside("/b/App.xcworkspace", root: "/a/wt"))
-        XCTAssertFalse(DerivedDataProjects.isInside("/a/wt-other/App.xcworkspace", root: "/a/wt"))
-        XCTAssertFalse(DerivedDataProjects.isInside("/a/anything", root: "/"))
-    }
-
-    func testProjectsInsideWorktreeFilter() {
-        let inside = DerivedDataProject(path: "/dd/A", workspacePath: "/a/wt/A.xcworkspace")
-        let sibling = DerivedDataProject(path: "/dd/B", workspacePath: "/a/wt-other/B.xcworkspace")
-        let unknown = DerivedDataProject(path: "/dd/C", workspacePath: nil)
-        XCTAssertEqual(DerivedDataProjects.projects([inside, sibling, unknown], inside: "/a/wt"), [inside])
-    }
 }

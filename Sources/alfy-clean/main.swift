@@ -18,9 +18,8 @@ struct AlfyClean: ParsableCommand {
   public static let configuration = CommandConfiguration(
     abstract: "alfy-clean helper",
     version: "alfy-clean version \(Constant.App.version)",
-    subcommands: [
-        Cache.self, Clean.self, WorktreeClean.self
-    ]
+    subcommands: [Clean.self],
+    defaultSubcommand: Clean.self
   )
 }
 

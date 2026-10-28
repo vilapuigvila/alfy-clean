@@ -1298,18 +1298,8 @@ private extension Clean {
         DiskUsage.format(bytes)
     }
 
-    static var foldersName: String {
-        return Cache.CacheFolder
-            .allCases
-            .map { $0.rawValue }.joined(separator: " or ")
-    }
-
     static var configMessage: String {
-"""
-Delete shit data of your developer folder 🚮,
-folders list:
-\(foldersName) 🥳
-"""
+        "Delete shit data of your developer folder 🚮"
     }
     
 }
