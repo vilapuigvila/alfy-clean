@@ -23,9 +23,27 @@ alfy-clean is a command-line helper for macOS that frees disk space used by Xcod
 
 ## Install
 
+### With Homebrew (recommended)
+
+```sh
+brew tap vilapuigvila/tap
+brew install alfy-clean
+```
+
+Homebrew builds the tool from source, so you need Xcode 13 or later, or the Xcode command line tools. To update later, run `brew upgrade alfy-clean`. To remove it, run `brew uninstall alfy-clean` and then `brew untap vilapuigvila/tap`.
+
+The tap formula is in [vilapuigvila/homebrew-tap](https://github.com/vilapuigvila/homebrew-tap).
+
+### From source
+
 Clone the repository, then build and install from it.
 
-### With make
+```sh
+git clone https://github.com/vilapuigvila/alfy-clean.git
+cd alfy-clean
+```
+
+#### With make
 
 ```sh
 make install
@@ -45,7 +63,7 @@ If `~/.local/bin` is not already on your `PATH`, add it, for example in `~/.zshr
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-### With swift build
+#### With swift build
 
 ```sh
 swift build -c release
@@ -166,6 +184,8 @@ swift build              # debug build
 swift build -c release   # release build, as used by make install
 swift test               # run the unit tests
 ```
+
+Releases are tagged `vX.Y.Z` on GitHub. The version in `main.swift` and the one asserted by `testExample` must match the tag. The Homebrew formula in `vilapuigvila/homebrew-tap` points at the tag's archive and needs its `url` and `sha256` updated for each new release.
 
 Project layout:
 
