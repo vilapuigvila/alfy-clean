@@ -133,6 +133,9 @@ Runs the option with number `n` once, without the menu. Options that delete ask 
 | 16 | SwiftPM cache | `~/Library/Caches/org.swift.swiftpm` | Yes |
 | 17 | Big folders in `~/Library/Caches` | The folders over 1 GB directly inside `~/Library/Caches` that you tick | Yes |
 
+<img width="1108" height="637" alt="image" src="https://github.com/user-attachments/assets/3f13e403-9b94-4ac5-80ba-d8c2a7e0ea5d" />
+
+
 Notes:
 
 - Options 1, 13, 14, 15 and 17 ask about each item they delete. Option 6 only opens a folder.
