@@ -6,10 +6,10 @@ alfy-clean is a command-line helper for macOS that frees disk space used by Xcod
 
 - Interactive checkbox menu. Nothing is ticked by default, and only ticked rows are deleted.
 - Rows are grouped into Xcode & iOS, Caches and System & apps, biggest first within each group, with a size for each row.
-- A risk glyph on each row: `●` safe (rebuilds itself), `◆` pick which (you choose items next), `▲` careful or can't undo, `○` look only (deletes nothing by itself).
+- A risk glyph on each row: `●` safe (rebuilds itself), `◆` pick which (you choose items next), `▲` careful or can't undo, `○` look only (deletes nothing by itself). Rows that cannot be undone, such as Delete simulators, are shown in red, and the inspector repeats "Can't undo · gone for good".
 - An inspector for the focused row shows what the option does, what it deletes, whether it comes back and whether it asks first. A running total shows what the current selection will free.
 - Derived Data picker: lists each Xcode project's DerivedData folder, flags orphans (the project no longer exists) and finds project-local DerivedData folders under your home folder.
-- Item pickers for simulators, iOS DeviceSupport versions, simulator runtimes, folders in `~/Library/Caches`, and a scan for large system folders.
+- Item pickers for simulators (erase or delete), iOS DeviceSupport versions, simulator runtimes, folders in `~/Library/Caches`, and a scan for large system folders.
 - Free-space report after each cleanup, measured from the disk before and after.
 - A yes/no prompt before every deletion. It names what will be removed.
 - Non-interactive modes: `alfy-clean all` and `alfy-clean -d <n>`.
@@ -107,7 +107,7 @@ Shows one yes/no prompt that lists what it will delete, then runs without the me
 - deletes every Derived Data folder it finds, Archives, Previews, the QuickHelp documentation cache, the Teams (classic) app data, the System Trash, the SwiftPM cache, and Maestro test output if that folder exists;
 - opens the Messages Attachments folder in Finder. It deletes nothing there.
 
-It does not touch iOS DeviceSupport, simulator runtimes, the Homebrew cache, Claude Code job folders, the folders in `~/Library/Caches`, or the large-folder scan.
+It does not touch iOS DeviceSupport, simulator runtimes, simulator devices picked for deletion in option 18, the Homebrew cache, Claude Code job folders, the folders in `~/Library/Caches`, or the large-folder scan.
 
 ### `alfy-clean -d <n>`
 
@@ -142,7 +142,7 @@ Runs the option with number `n` once, without the menu. Options that delete ask 
 
 Notes:
 
-- Options 1, 13, 14, 15 and 17 ask about each item they delete. Option 6 only opens a folder.
+- Options 1, 13, 14, 15, 17 and 18 ask about each item they delete. Option 6 only opens a folder.
 - Option 15 first asks for the size to scan for: 2, 5 or 10 GB, with 5 GB pre-selected. `-d 15` skips the question and uses 5 GB.
 - `--help` also lists `-v, --verbose` and a second positional word `ndd`. The code does not read either, so they have no effect.
 
@@ -164,6 +164,7 @@ Every cleanup deletes permanently. Files are removed with `rm -rf`, `find -exec 
 
 - Archives (`.xcarchive` and dSYMs). You can only get them back by archiving again from source. dSYMs are needed to symbolicate crash reports from old builds.
 - The System Trash.
+- Simulator devices removed with option 18. Xcode does not restore them: create them again in Xcode ▸ Window ▸ Devices and Simulators.
 - Data inside erased simulators: apps, app data, logins, keychains and settings. The simulator devices themselves stay installed.
 
 **Back up first if you might need them:**
@@ -171,6 +172,7 @@ Every cleanup deletes permanently. Files are removed with `rm -rf`, `find -exec 
 - Archives you may re-sign, re-distribute, or use for crash symbolication. Copy the `.xcarchive` and its dSYMs somewhere else.
 - Anything in the Trash.
 - Simulator data you have not set up again: test data, signed-in accounts, keychain items.
+- The names and iOS versions of simulators you plan to delete with option 18, so you can recreate them the same way.
 - Maestro test output you want to keep, such as screenshots and recordings.
 
 **Safeguards in the code:**

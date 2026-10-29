@@ -79,7 +79,15 @@ struct CheckboxTableLayout {
     private typealias C = Print.Color
     private typealias Cell = (text: String, visible: Int)
 
-    private let listWidth = 44
+    /// The list column fits its longest row, so names are not cut short. The inspector keeps at least 43 columns.
+    private var listWidth: Int {
+        let outer = max(min(size.columns, 124) - 1, 44)
+        let width = outer - 4
+        let sizeWidth = max(rows.map { $0.size.count }.max() ?? 0, 6)
+        let longestName = rows.map { $0.name.count }.max() ?? 0
+        let needed = 4 + 2 + longestName + 2 + sizeWidth + 2 + 1     // "❯ ☐ " + name + gap + size + gap + dot
+        return min(max(44, needed), max(width - 44, 44))
+    }
     private let separator = " │ "
     /// Below this width the inspector is stacked under the list instead of beside it.
     private let sideBySideMinimum = 88
@@ -194,6 +202,15 @@ struct CheckboxTableLayout {
 
     // MARK: Inspector
 
+    /// The row's risk line. A warning row adds the "can't undo" line in red under it.
+    private func riskLines(_ row: CheckboxTableRow) -> [String] {
+        var lines = [paint("\(row.risk.dot) \(row.risk.label)", row.risk.color)]
+        if row.isWarning {
+            lines.append(paint("\(CheckboxTableRow.Risk.final.dot) \(CheckboxTableRow.Risk.final.label)", .red))
+        }
+        return lines
+    }
+
     /// The focused row: name, size, risk, what it does and the facts.
     /// `roomy` adds blank lines and small headings, `compact` puts each fact on one line,
     /// `minimal` is just name and size, the risk and one line of what it does.
@@ -203,14 +220,14 @@ struct CheckboxTableLayout {
         if style == .minimal {
             let size = row.size
             out.append(paint(fit(row.name, max(width - size.count - 2, 1)), .bold) + "  " + dim(size))
-            out.append(paint("\(row.risk.dot) \(row.risk.label)", row.risk.color))
+            out += riskLines(row)
             out += wrap(row.summary, width: width, maxLines: 1)
             return out
         }
 
         out.append(dim(fit(row.name, width)))
         out.append(paint(fit(row.size, width), .bold))
-        out.append(paint("\(row.risk.dot) \(row.risk.label)", row.risk.color))
+        out += riskLines(row)
 
         if style == .roomy {
             out.append("")
