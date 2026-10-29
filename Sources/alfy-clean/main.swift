@@ -10,7 +10,7 @@ import ArgumentParser
 
 struct Constant {
   struct App {
-    static let version = "0.0.2"
+    static let version = "0.1.0"
   }
 }
 

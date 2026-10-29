@@ -80,7 +80,7 @@ The binary is at `.build/release/alfy-clean`. Run it from there, or copy it to a
 alfy-clean              # interactive menu (the default)
 alfy-clean all          # run the "all" cleanup after one confirmation
 alfy-clean -d 3         # run one option by number (3 = Derived Data)
-alfy-clean --version    # prints: alfy-clean version 0.0.2
+alfy-clean --version    # prints: alfy-clean version 0.1.0
 alfy-clean --help
 ```
 
