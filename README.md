@@ -111,14 +111,14 @@ It does not touch iOS DeviceSupport, simulator runtimes, the Homebrew cache, Cla
 
 ### `alfy-clean -d <n>`
 
-Runs the option with number `n` once, without the menu. Options that delete ask for one yes/no first, as in the menu. For Derived Data, `-d 3` deletes every Derived Data folder found, not a chosen subset. A number outside 0 to 17 stops the program with an error.
+Runs the option with number `n` once, without the menu. Options that delete ask for one yes/no first, as in the menu. For Derived Data, `-d 3` deletes every Derived Data folder found, not a chosen subset. A number outside 0 to 18 stops the program with an error.
 
 ### Options
 
 | No. | Option | What it deletes | In menu |
 |----:|--------|-----------------|---------|
 | 0 | All, derived data excluded | Everything in `all` except Derived Data, plus the whole iOS DeviceSupport folder | Hidden |
-| 1 | Erase simulators | The simulators you tick: apps, data, logins, keychains and settings. Running ones are shut down first. Devices stay installed. | Yes |
+| 1 | Erase simulators content | The simulators you tick: apps, data, logins, keychains and settings. Running ones are shut down first. Devices stay installed. | Yes |
 | 2 | Delete cloned simulators | `~/Library/Developer/XCTestDevices` and `XCPGDevices` (clones made for parallel tests and Playgrounds) | Yes |
 | 3 | Derived Data | Xcode DerivedData folders: the ones you tick in the menu, or all found with `-d 3` | Yes |
 | 4 | Archives | `~/Library/Developer/Xcode/Archives` (`.xcarchive` and dSYMs) | Yes |
@@ -132,9 +132,10 @@ Runs the option with number `n` once, without the menu. Options that delete ask 
 | 12 | Claude Code jobs tmp | The `tmp` folder inside each `~/.claude/jobs/<job>` | Yes |
 | 13 | iOS DeviceSupport versions | The versions you tick in `~/Library/Developer/Xcode/iOS DeviceSupport` | Yes |
 | 14 | Simulator runtimes | The runtimes you tick, removed with `simctl` | Yes |
-| 15 | Scan for folders over 3 GB | Nothing by itself. It scans, then lets you tick folders from a fixed list of safe locations | Yes |
+| 15 | Scan for folders over a size you choose | Nothing by itself. You pick 2, 5 or 10 GB (5 GB by default), it scans for folders bigger than that, then lets you tick folders from a fixed list of safe locations | Yes |
 | 16 | SwiftPM cache | `~/Library/Caches/org.swift.swiftpm` | Yes |
 | 17 | Big folders in `~/Library/Caches` | The folders over 1 GB directly inside `~/Library/Caches` that you tick | Yes |
+| 18 | Delete simulators | The simulators you tick, removed for good with `simctl delete`. Running ones are shut down first. They must be created again to be used. | Yes |
 
 <img width="1108" height="637" alt="image" src="https://github.com/user-attachments/assets/3f13e403-9b94-4ac5-80ba-d8c2a7e0ea5d" />
 
@@ -142,6 +143,7 @@ Runs the option with number `n` once, without the menu. Options that delete ask 
 Notes:
 
 - Options 1, 13, 14, 15 and 17 ask about each item they delete. Option 6 only opens a folder.
+- Option 15 first asks for the size to scan for: 2, 5 or 10 GB, with 5 GB pre-selected. `-d 15` skips the question and uses 5 GB.
 - `--help` also lists `-v, --verbose` and a second positional word `ndd`. The code does not read either, so they have no effect.
 
 ## What gets deleted and what is safe

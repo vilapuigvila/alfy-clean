@@ -222,6 +222,8 @@ struct Clean: ParsableCommand {
             try deleteSimulatorRuntimes()
         case .userCaches:
             try deleteLargeCacheFolders()
+        case .deleteSimulators:
+            try deleteSelectedSimulators()
         case .derivedData:
             try deleteDerivedData(derivedDataFolders ?? DerivedDataDiscovery.found)
             sendNotification(message: "\(optionInput.title) cleaned")
@@ -385,6 +387,63 @@ struct Clean: ParsableCommand {
         sendNotification(message: "Simulators erased")
     }
 
+    private func deleteSelectedSimulators() throws {
+        var devices: [SimulatorDevice] = []
+        var usages: [String: DiskUsage] = [:]
+        try runWithLoader("Measuring simulators") {
+            devices = SimulatorDevices.list().filter { $0.runtime.hasPrefix("iOS") }
+            usages = DiskUsage.measure(paths: devices.map { $0.dataPath })
+        }
+
+        guard !devices.isEmpty else {
+            Print.withColor(.yellow, "No simulators found.")
+            return
+        }
+
+        // Heaviest first, ties by name so the order is stable.
+        devices.sort {
+            let lhs = usages[$0.dataPath]?.bytes ?? 0
+            let rhs = usages[$1.dataPath]?.bytes ?? 0
+            return lhs != rhs ? lhs > rhs : $0.name < $1.name
+        }
+
+        let selected = Prompt().checkboxOptions(
+            devices,
+            question: "\n\(Print.Color.boldGreen.rawValue)Select simulators to delete\(Print.Color.reset.rawValue)  \(Print.Color.dim.rawValue)the devices are removed for good and must be created again to be used\(Print.Color.reset.rawValue)",
+            label: { device in
+                let usage = usages[device.dataPath] ?? .zero
+                let prefix = usage.isPartial ? "~" : ""
+                let running = device.isBooted ? "  •  running" : ""
+                return "\(device.name)  \(Print.Color.dim.rawValue)\(device.runtime)  •  \(prefix)\(formatStorage(usage.bytes))\(running)\(Print.Color.reset.rawValue)"
+            }
+        )
+
+        guard !selected.isEmpty else {
+            Print.withColor(.yellow, "No simulators selected.")
+            return
+        }
+
+        let names = selected.map { "\($0.name) (\($0.runtime))" }.joined(separator: ", ")
+        let confirmDelete = Prompt().yesNo("⚠️  Delete \(names)? This cannot be undone: the simulators are removed with their apps and data, and must be created again to be used. Running ones are shut down first.")
+        guard confirmDelete else {
+            Print.withColor(.yellow, "Cancelled.")
+            return
+        }
+
+        for device in selected {
+            var result = ShellResult(output: "", exitCode: 0)
+            try runWithLoader("Deleting \(device.name)") {
+                result = SimulatorDevices.delete(device)
+            }
+            if result.success {
+                Print.withColor(.green, "Deleted \(device.name) (\(device.runtime))")
+            } else {
+                Print.withColor(.red, "Failed to delete \(device.name): \(result.output)")
+            }
+        }
+        sendNotification(message: "Simulators deleted")
+    }
+
     /// Lets the user pick which folders over 1 GB directly inside ~/Library/Caches to delete.
     private func deleteLargeCacheFolders() throws {
         var large: [(path: String, usage: DiskUsage)] = []
@@ -540,14 +599,22 @@ struct Clean: ParsableCommand {
 
     private func listLargeSystemFolders() throws {
         var output = ""
+        // The menu asks which size to scan for (5 GB pre-selected). `-d 15` runs without a prompt, so it uses the default.
+        let threshold = delete == nil
+            ? Prompt().options(
+                SystemScanner.SizeThreshold.allCases,
+                question: "Show folders bigger than:",
+                defaultAnswer: SystemScanner.SizeThreshold.default
+            ) ?? SystemScanner.SizeThreshold.default
+            : SystemScanner.SizeThreshold.default
 
-        try runWithLoader("Scanning system folders larger than 3 GB (this may take a moment)") {
-            output = SystemScanner.listLargeFolders()
+        try runWithLoader("Scanning system folders larger than \(threshold) (this may take a moment)") {
+            output = SystemScanner.listLargeFolders(threshold: threshold)
         }
 
-        Print.withColor(.boldGreen, "Deepest folders larger than 3 GB")
+        Print.withColor(.boldGreen, "Deepest folders larger than \(threshold)")
         if output.isEmpty {
-            Print.withColor(.yellow, "No folders larger than 3 GB found in scanned locations.")
+            Print.withColor(.yellow, "No folders larger than \(threshold) found in scanned locations.")
         } else {
             Print.withColor(.cyan, "Showing largest 50 deepest folders (parent folders excluded):\n")
             customPrint(output.components(separatedBy: "\n").map { $0.terminalSafe }.joined(separator: "\n"))
@@ -749,6 +816,7 @@ extension Clean {
         case largeSystemFolders             // Scan for large system folders (info only)
         case swiftPMCache                   // SwiftPM package cache (~/Library/Caches/org.swift.swiftpm)
         case userCaches                     // Pick big folders (> 1 GB) directly inside ~/Library/Caches
+        case deleteSimulators               // ⚠️ Pick simulators to delete for good (must be recreated)
         init(value: Int) throws {
             switch value {
             case 0: self = .noDerivedData
@@ -769,6 +837,7 @@ extension Clean {
             case 15: self = .largeSystemFolders
             case 16: self = .swiftPMCache
             case 17: self = .userCaches
+            case 18: self = .deleteSimulators
             default: throw "Manage this case \(value)"
             }
         }
@@ -791,9 +860,10 @@ extension Clean {
             case .claudeJobsTmp: return "🤖 Claude Code jobs tmp folders"
             case .deviceSupport: return "📱 iOS DeviceSupport versions"
             case .simulatorRuntimes: return "📦 Simulator runtimes"
-            case .largeSystemFolders: return "🔎 List system folders > 3 GB"
+            case .largeSystemFolders: return "🔎 Scan for folders over a size you choose"
             case .swiftPMCache: return "📦 SwiftPM cache"
             case .userCaches: return "🗂️ Big folders in ~/Library/Caches"
+            case .deleteSimulators: return "⚠️  Delete simulators (gone, must be recreated)"
             }
         }
 
@@ -831,11 +901,13 @@ extension Clean {
             case .simulatorRuntimes:
                 return "Lets you pick runtimes to delete with simctl. Download them again from Xcode to restore."
             case .largeSystemFolders:
-                return "Scans the disk for folders over 3 GB, then lets you tick the safe ones to delete."
+                return "Asks for a size (over 2, 5 or 10 GB, 5 GB by default), scans the disk for folders over it, then lets you tick the safe ones to delete."
             case .swiftPMCache:
                 return "Deletes SwiftPM's shared cache of package downloads. Packages are fetched again on the next resolve."
             case .userCaches:
                 return "Lists the folders over 1 GB in ~/Library/Caches and lets you tick which to delete. Apps rebuild them."
+            case .deleteSimulators:
+                return "Lets you pick simulators and deletes them with simctl. They are gone and must be created again to be used."
             }
         }
 
@@ -860,7 +932,7 @@ extension Clean {
         var tableName: String {
             switch self {
             case .noDerivedData: return "All except Derived Data"
-            case .simultorsData: return "Erase simulators"
+            case .simultorsData: return "Erase simulators content"
             case .clonedSimulatorsData: return "Delete cloned sims"
             case .derivedData: return "Derived Data"
             case .archives: return "Archives"
@@ -874,9 +946,10 @@ extension Clean {
             case .claudeJobsTmp: return "Claude Code jobs tmp"
             case .deviceSupport: return "iOS DeviceSupport"
             case .simulatorRuntimes: return "Simulator runtimes"
-            case .largeSystemFolders: return "Scan for folders over 3 GB"
+            case .largeSystemFolders: return "Scan for folders over a size you choose"
             case .swiftPMCache: return "SwiftPM cache"
             case .userCaches: return "Caches > 1 GB"
+            case .deleteSimulators: return "Delete simulators"
             }
         }
 
@@ -886,7 +959,7 @@ extension Clean {
             case .derivedData, .previews, .documentationCache, .clonedSimulatorsData,
                  .homebrewCache, .maestroTests, .claudeJobsTmp, .swiftPMCache:
                 return .safe
-            case .simultorsData, .deviceSupport, .simulatorRuntimes, .userCaches: return .pick
+            case .simultorsData, .deviceSupport, .simulatorRuntimes, .userCaches, .deleteSimulators: return .pick
             case .archives, .trash: return .final
             case .microsoftTeamsCache: return .slow
             case .messagesAttachments, .largeSystemFolders: return .look
@@ -909,7 +982,8 @@ extension Clean {
         var category: Category {
             switch self {
             case .noDerivedData, .derivedData, .archives, .previews, .documentationCache,
-                 .deviceSupport, .simulatorRuntimes, .simultorsData, .clonedSimulatorsData, .maestroTests:
+                 .deviceSupport, .simulatorRuntimes, .simultorsData, .clonedSimulatorsData, .maestroTests,
+                 .deleteSimulators:
                 return .xcodeIOS
             case .homebrewCache, .claudeJobsTmp, .swiftPMCache, .userCaches:
                 return .caches
@@ -921,7 +995,7 @@ extension Clean {
         /// The user chooses items in a follow-up prompt, so the size shown is a ceiling.
         var picksItemsNext: Bool {
             self == .simultorsData || self == .deviceSupport || self == .simulatorRuntimes || self == .userCaches
-                || self == .derivedData
+                || self == .derivedData || self == .deleteSimulators
         }
 
         /// What it removes, for the "Deletes" line of the detail box.
@@ -945,6 +1019,7 @@ extension Clean {
             case .largeSystemFolders: return "Nothing until you tick folders from the scan"
             case .swiftPMCache: return "~/Library/Caches/org.swift.swiftpm"
             case .userCaches: return "The folders over 1 GB in ~/Library/Caches that you tick"
+            case .deleteSimulators: return "The simulator devices you tick, through simctl"
             }
         }
 
@@ -968,6 +1043,7 @@ extension Clean {
             case .largeSystemFolders: return "Depends on what you delete"
             case .swiftPMCache: return "Yes, packages download again"
             case .userCaches: return "Yes, apps rebuild their caches; a few may sign you out or re-download data"
+            case .deleteSimulators: return "No: create them again in Xcode ▸ Window ▸ Devices and Simulators"
             }
         }
 
@@ -975,7 +1051,7 @@ extension Clean {
             switch self {
             case .messagesAttachments: return "Nothing to ask, it only opens the folder"
             case .largeSystemFolders: return "Per folder, before anything is removed"
-            case .simultorsData, .deviceSupport, .simulatorRuntimes, .userCaches: return "Per item, before anything is removed"
+            case .simultorsData, .deviceSupport, .simulatorRuntimes, .userCaches, .deleteSimulators: return "Per item, before anything is removed"
             case .derivedData: return "Which projects and shared caches go, then a yes/no listing them"
             default: return "One yes/no before it runs, listing what goes"
             }
@@ -983,14 +1059,14 @@ extension Clean {
 
         var runsInAllCleanup: Bool {
             self != .largeSystemFolders && self != .simulatorRuntimes && self != .homebrewCache && self != .deviceSupport && self != .claudeJobsTmp
-                && self != .userCaches
+                && self != .userCaches && self != .deleteSimulators
         }
 
         /// Deletes without a prompt of its own. Simulators, DeviceSupport, runtimes and the large-folder scan
         /// ask per item; Messages only opens a folder.
         var needsConfirmation: Bool {
             switch self {
-            case .simultorsData, .deviceSupport, .simulatorRuntimes, .largeSystemFolders, .messagesAttachments, .userCaches:
+            case .simultorsData, .deviceSupport, .simulatorRuntimes, .largeSystemFolders, .messagesAttachments, .userCaches, .deleteSimulators:
                 return false
             default:
                 return true
@@ -1034,7 +1110,7 @@ extension Clean {
                     "~/.maestro/tests",
                     "~/Library/Caches/org.swift.swiftpm"
                 ]
-            case .simultorsData:
+            case .simultorsData, .deleteSimulators:
                 return ["~/Library/Developer/CoreSimulator/Devices"]
             case .clonedSimulatorsData:
                 return [
@@ -1141,6 +1217,7 @@ extension Clean {
             case .largeSystemFolders: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .swiftPMCache: return Self.remove("~/Library/Caches/org.swift.swiftpm")
             case .userCaches: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
+            case .deleteSimulators: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             }
         }
     }
@@ -1198,6 +1275,7 @@ private extension Clean {
                 bytes: bytes,
                 size: size,
                 risk: optionInput.risk,
+                isWarning: optionInput == .deleteSimulators,
                 isApproximate: isApproximate,
                 isUpperBound: optionInput.picksItemsNext,
                 summary: optionInput.actionDescription,

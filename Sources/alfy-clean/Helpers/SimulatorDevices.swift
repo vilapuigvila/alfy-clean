@@ -58,6 +58,15 @@ struct SimulatorDevices {
         return simctl(["erase", device.udid])
     }
 
+    /// Shuts the device down if it's running, then deletes it for good.
+    static func delete(_ device: SimulatorDevice) -> ShellResult {
+        if device.isBooted {
+            let shutdown = simctl(["shutdown", device.udid])
+            guard shutdown.success else { return shutdown }
+        }
+        return simctl(["delete", device.udid])
+    }
+
     /// "com.apple.CoreSimulator.SimRuntime.iOS-26-4" -> "iOS 26.4"
     private static func runtimeName(_ identifier: String) -> String {
         let suffix = identifier.components(separatedBy: ".").last ?? identifier

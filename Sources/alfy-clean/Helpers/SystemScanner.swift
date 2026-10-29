@@ -7,9 +7,23 @@
 import Foundation
 
 struct SystemScanner {
-    /// Scans system folders for directories larger than 3GB, removes parent folders, and returns formatted output.
+    /// The size a folder must be bigger than to be listed. The menu offers these three; 5 GB is the default.
+    enum SizeThreshold: Int, CaseIterable, CustomStringConvertible {
+        case twoGB = 2
+        case fiveGB = 5
+        case tenGB = 10
+
+        static let `default`: SizeThreshold = .fiveGB
+
+        var description: String { "\(rawValue) GB" }
+
+        /// The same size in the KiB that `du -k` reports (the scan labels sizes in 1,000,000,000-byte GB).
+        var kilobytes: Int { rawValue * 1_000_000_000 / 1024 }
+    }
+
+    /// Scans system folders for directories bigger than `threshold`, removes parent folders, and returns formatted output.
     /// Returns empty string if scan fails.
-    static func listLargeFolders() -> String {
+    static func listLargeFolders(threshold: SizeThreshold = .default) -> String {
         let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
         // du exits non-zero when it can't read a folder, but still prints every size it did get.
         let du = runProcess(
@@ -18,11 +32,16 @@ struct SystemScanner {
             errorOutput: .discarded
         )
         guard !du.output.isEmpty else { return "" }
+        return largeFolders(fromDU: du.output, threshold: threshold)
+    }
 
+    /// Filters `du -k` output down to the folders bigger than `threshold`, as formatted lines.
+    /// Split out from `listLargeFolders` so the filter can be tested without scanning the disk.
+    static func largeFolders(fromDU duOutput: String, threshold: SizeThreshold = .default) -> String {
         let awk = runProcess(
             "/usr/bin/awk",
-            ["-v", "excluded=\(excludedPaths.joined(separator: "|"))", awkProgram],
-            input: Data(du.output.utf8),
+            ["-v", "excluded=\(excludedPaths.joined(separator: "|"))", "-v", "minKB=\(threshold.kilobytes)", awkProgram],
+            input: Data(duOutput.utf8),
             errorOutput: .discarded
         )
         guard awk.success else { return "" }
@@ -56,7 +75,7 @@ struct SystemScanner {
     ]
 
     /// awk script run over `du -k` output: drops excluded folders, subtracts their size from parents, and
-    /// filters out parent folders when a child folder > 3GB exists in the result set. Prints "<kilobytes> <path>".
+    /// filters out parent folders when a child folder over `minKB` exists in the result set. Prints "<kilobytes> <path>".
     /// Sorting and the top-50 cut happen in Swift (see `listLargeFolders`).
     private static let awkProgram = """
           BEGIN { FS="\\t"; OFS=" "; n = split(excluded, ex, "|") } {
@@ -90,7 +109,7 @@ struct SystemScanner {
             for (e in excludedSize) {
               if (index(e, paths[k] "/") == 1) size -= excludedSize[e]
             }
-            if (size < 2929688) continue
+            if (size <= minKB) continue
             kept++
             keptPath[kept] = paths[k]
             keptSize[kept] = size

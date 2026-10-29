@@ -51,6 +51,8 @@ struct CheckboxTableRow {
     /// Text for the size column, e.g. "62.2 GB", "~0 MB" or "scan".
     var size: String
     var risk: Risk
+    /// Destructive enough to show in red, so the user notices it before ticking.
+    var isWarning = false
     /// The size is partly estimated: the total shows "~".
     var isApproximate = false
     /// The size is a ceiling because the user picks items next: the total shows "up to".
@@ -171,8 +173,14 @@ struct CheckboxTableLayout {
             let cursor = isFocused ? paint("❯", .boldGreen) : " "
             let checkbox = isSelected ? paint("☑", .green) : "☐"
             let name = padRight(fit(row.name, nameWidth), nameWidth)
-            let shownName = isFocused ? paint(name, .boldGreen) : (isSelected ? paint(name, .green) : name)
-            let text = "\(cursor) \(checkbox) \(shownName)  \(padLeft(row.size, sizeWidth))  \(paint(row.risk.dot, row.risk.color))"
+            let shownName: String
+            if row.isWarning {
+                shownName = paint(name, isFocused ? .boldRed : .red)
+            } else {
+                shownName = isFocused ? paint(name, .boldGreen) : (isSelected ? paint(name, .green) : name)
+            }
+            let dotColor = row.isWarning ? C.red : row.risk.color
+            let text = "\(cursor) \(checkbox) \(shownName)  \(padLeft(row.size, sizeWidth))  \(paint(row.risk.dot, dotColor))"
             cells.append((text, listWidth))
         }
         return cells
