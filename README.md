@@ -27,8 +27,11 @@ alfy-clean is a command-line helper for macOS that frees disk space used by Xcod
 
 ```sh
 brew tap vilapuigvila/tap
+brew trust vilapuigvila/tap
 brew install alfy-clean
 ```
+
+Homebrew asks you to trust third-party taps before it loads their formulae, so `brew trust` is required once per tap. Without it, `brew install` stops with "Refusing to load formula".
 
 Homebrew builds the tool from source, so you need Xcode 13 or later, or the Xcode command line tools. To update later, run `brew upgrade alfy-clean`. To remove it, run `brew uninstall alfy-clean` and then `brew untap vilapuigvila/tap`.
 
