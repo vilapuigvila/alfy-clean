@@ -152,14 +152,16 @@ final class Prompt {
         _ options: [T],
         question: String? = nil,
         label: (T) -> String = { "\($0)" },
-        detail: ((T) -> String?)? = nil
+        detail: ((T) -> String?)? = nil,
+        preselected: Set<Int> = [],
+        singleChoice: Bool = false
     ) -> [T] {
         guard !options.isEmpty else { return [] }
         guard isatty(STDIN_FILENO) != 0 else {
             return lineInputCheckboxOptions(options, question: question, label: label, detail: detail)
         }
 
-        let picked = runSelectionLoop(count: options.count) { focusedIndex, selectedIndexes in
+        let picked = runSelectionLoop(count: options.count, preselected: preselected, singleChoice: singleChoice) { focusedIndex, selectedIndexes in
             var lines: [String] = []
             if let question = question {
                 lines.append(contentsOf: question.components(separatedBy: .newlines))
@@ -233,9 +235,11 @@ final class Prompt {
     /// Returns the selected indexes (empty when cancelled), or nil if the terminal can't enter raw mode.
     private func runSelectionLoop(
         count: Int,
+        preselected: Set<Int> = [],
+        singleChoice: Bool = false,
         draw: (_ focused: Int, _ selected: Set<Int>) -> [String]
     ) -> [Int]? {
-        var selectedIndexes = Set<Int>()
+        var selectedIndexes = preselected
         var focusedIndex = 0
         var renderedLineCount = 0
 
@@ -282,6 +286,7 @@ final class Prompt {
                 if selectedIndexes.contains(focusedIndex) {
                     selectedIndexes.remove(focusedIndex)
                 } else {
+                    if singleChoice { selectedIndexes.removeAll() }
                     selectedIndexes.insert(focusedIndex)
                 }
                 render()

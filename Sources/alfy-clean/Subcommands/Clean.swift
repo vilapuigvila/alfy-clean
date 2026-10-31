@@ -600,13 +600,17 @@ struct Clean: ParsableCommand {
     private func listLargeSystemFolders() throws {
         var output = ""
         // The menu asks which size to scan for (5 GB pre-selected). `-d 15` runs without a prompt, so it uses the default.
-        let threshold = delete == nil
-            ? Prompt().options(
-                SystemScanner.SizeThreshold.allCases,
-                question: "Show folders bigger than:",
-                defaultAnswer: SystemScanner.SizeThreshold.default
-            ) ?? SystemScanner.SizeThreshold.default
-            : SystemScanner.SizeThreshold.default
+        var threshold = SystemScanner.SizeThreshold.default
+        if delete == nil {
+            let all = SystemScanner.SizeThreshold.allCases
+            let picked = Prompt().checkboxOptions(
+                all,
+                question: "Show folders bigger than: (pick one)",
+                preselected: Set(all.indices.filter { all[$0] == SystemScanner.SizeThreshold.default }),
+                singleChoice: true
+            )
+            threshold = picked.first ?? SystemScanner.SizeThreshold.default
+        }
 
         try runWithLoader("Scanning system folders larger than \(threshold) (this may take a moment)") {
             output = SystemScanner.listLargeFolders(threshold: threshold)

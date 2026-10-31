@@ -33,7 +33,14 @@ brew install alfy-clean
 
 Homebrew asks you to trust third-party taps before it loads their formulae, so `brew trust` is required once per tap. Without it, `brew install` stops with "Refusing to load formula".
 
-Homebrew builds the tool from source, so you need Xcode 13 or later, or the Xcode command line tools. To update later, run `brew upgrade alfy-clean`. To remove it, run `brew uninstall alfy-clean` and then `brew untap vilapuigvila/tap`.
+Homebrew builds the tool from source, so you need Xcode 13 or later, or the Xcode command line tools. To remove it, run `brew uninstall alfy-clean` and then `brew untap vilapuigvila/tap`.
+
+Users who installed through the tap update with Homebrew:
+
+```sh
+brew update
+brew upgrade alfy-clean
+```
 
 The tap formula is in [vilapuigvila/homebrew-tap](https://github.com/vilapuigvila/homebrew-tap).
 
