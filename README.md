@@ -5,7 +5,7 @@ alfy-clean is a command-line helper for macOS that frees disk space used by Xcod
 ## Features
 
 - Interactive checkbox menu. Nothing is ticked by default, and only ticked rows are deleted.
-- Rows are grouped into Xcode & iOS, Caches and System & apps, biggest first within each group, with a size for each row.
+- Rows are grouped into Xcode & iOS, Caches, AI (Claude Code) and System & apps, biggest first within each group, with a size for each row.
 - A risk glyph on each row: `●` safe (rebuilds itself), `◆` pick which (you choose items next), `▲` careful or can't undo, `○` look only (deletes nothing by itself). Rows that cannot be undone, such as Delete simulators, are shown in red, and the inspector repeats "Can't undo · gone for good".
 - An inspector for the focused row shows what the option does, what it deletes, whether it comes back and whether it asks first. A running total shows what the current selection will free.
 - Derived Data picker: lists each Xcode project's DerivedData folder, flags orphans (the project no longer exists) and finds project-local DerivedData folders under your home folder.
@@ -13,7 +13,8 @@ alfy-clean is a command-line helper for macOS that frees disk space used by Xcod
 - Free-space report after each cleanup, measured from the disk before and after.
 - A yes/no prompt before every deletion. It names what will be removed.
 - Non-interactive modes: `alfy-clean all` and `alfy-clean -d <n>`.
-- macOS notifications when a cleanup step finishes. They use `terminal-notifier` if it is installed and `osascript` otherwise (when terminal-notifier is installed, the first notification also builds a copy of it with the alfy-clean logo as its icon, in `~/.local/share/alfy-clean/`; macOS asks once to allow that copy's notifications), and each one plays a short synthesized bass groove with `afplay` (generated in code, cached in `~/Library/Caches/alfy-clean/`): the plain groove when the menu is ready to choose from, and the same groove played backwards and tuned down 2 semitones when a row has finished.
+- macOS notifications when a cleanup step finishes. They try, in order, a copy of Homebrew's `terminal-notifier` with the alfy-clean logo as its icon, the Homebrew `terminal-notifier` itself, and `osascript`, skipping any that macOS has turned off. The logo copy is built on first use in `~/.local/share/alfy-clean/` when terminal-notifier is installed; macOS asks once to allow its notifications.
+- Notification sounds are synthesized in code and played with `afplay` (cached in `~/Library/Caches/alfy-clean/`): a funk bass groove when the menu is ready to choose from, and the same groove played backwards and tuned down 2 semitones when a row has finished.
 
 ## Requirements
 
@@ -87,7 +88,7 @@ The binary is at `.build/release/alfy-clean`. Run it from there, or copy it to a
 alfy-clean              # interactive menu (the default)
 alfy-clean all          # run the "all" cleanup after one confirmation
 alfy-clean -d 3         # run one option by number (3 = Derived Data)
-alfy-clean --version    # prints: alfy-clean version 0.1.0
+alfy-clean --version    # prints: alfy-clean version 0.2.0
 alfy-clean --help
 ```
 
@@ -114,7 +115,7 @@ Shows one yes/no prompt that lists what it will delete, then runs without the me
 - deletes every Derived Data folder it finds, Archives, Previews, the QuickHelp documentation cache, the Teams (classic) app data, the System Trash, the SwiftPM cache, and Maestro test output if that folder exists;
 - opens the Messages Attachments folder in Finder. It deletes nothing there.
 
-It does not touch iOS DeviceSupport, simulator runtimes, simulator devices picked for deletion in option 18, the Homebrew cache, Claude Code job folders, the folders in `~/Library/Caches`, or the large-folder scan.
+It does not touch iOS DeviceSupport, simulator runtimes, simulator devices picked for deletion in option 18, the Homebrew cache, Claude Code job folders, Claude Code session files (option 19), the folders in `~/Library/Caches`, or the large-folder scan.
 
 ### `alfy-clean -d <n>`
 
@@ -161,6 +162,7 @@ Every cleanup deletes permanently. Files are removed with `rm -rf`, `find -exec 
 
 - Derived Data: the next build is slow, because it starts from scratch.
 - Cloned simulators, the Previews cache, Maestro output and Claude Code job tmp folders: recreated on next use.
+- Claude Code session files (option 19, the `claude-*` folders in `/private/tmp`): Claude Code recreates them. Close every Claude Code session first, because deleting them under a running session can lose its data.
 - Documentation, Homebrew and SwiftPM caches: downloaded again when needed.
 - iOS DeviceSupport: copied again when you connect a device running that iOS version.
 - Simulator runtimes: download again from Xcode > Settings > Components. Simulators that use them are unavailable until then.
@@ -187,6 +189,7 @@ Every cleanup deletes permanently. Files are removed with `rm -rf`, `find -exec 
 - Nothing is ticked by default.
 - A prompt that receives end-of-input stops the program. It is never read as yes.
 - Derived Data folders must be named exactly `DerivedData`. A project-local one is included only when an `.xcodeproj` or `.xcworkspace` sits in its parent or grandparent folder.
+- Claude Code session files (option 19) are refused while any Claude Code process of yours is running. The check runs again right before deleting, and each folder is re-checked just before it is removed. Only real folders you own, directly inside `/private/tmp`, are listed.
 - The large-folder scan only offers folders from a fixed list (under your home folder's `DerivedData`, the CoreDevice deltas folder, or your own Claude temp folder). Each one is checked again just before deletion.
 - If `~/.Trash` cannot be read, the Trash option stops with a message. Grant Full Disk Access to your terminal app and try again.
 
@@ -214,7 +217,8 @@ Sources/alfy-clean/
   Subcommands/Clean.swift           the Clean command: options, menu flow, every cleanup
   Helpers/                          Derived Data discovery and projects, disk usage,
                                     menu table, prompts, process runner, simulators,
-                                    notifications and other helpers
+                                    Claude Code session folders, notification sounds
+                                    and logo notifier, and other helpers
   Extensions/                       String+Error, URL+FileManager
 Tests/alfy-cleanTests/              unit tests
 ```
