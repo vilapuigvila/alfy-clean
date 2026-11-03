@@ -49,7 +49,7 @@ final class Prompt {
             }
             
             // print prompt
-            customPrint(defaultText, terminator: " > ")
+            customPrint(defaultText(), terminator: " > ")
             
             // parse answer
             guard let answer = customReadline(true)?.trim else {
