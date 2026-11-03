@@ -32,11 +32,11 @@ final class DeleteSimulatorsOptionTests: XCTestCase {
             .noDerivedData, .simultorsData, .clonedSimulatorsData, .derivedData, .archives, .previews,
             .messagesAttachments, .microsoftTeamsCache, .documentationCache, .trash, .homebrewCache,
             .maestroTests, .claudeJobsTmp, .deviceSupport, .simulatorRuntimes, .largeSystemFolders,
-            .swiftPMCache, .userCaches
+            .swiftPMCache, .userCaches, .deleteSimulators, .claudeSessionFolders
         ]
         for (number, option) in expected.enumerated() {
             XCTAssertEqual(try Option(value: number), option, "-d \(number)")
         }
-        XCTAssertThrowsError(try Option(value: 19))
+        XCTAssertThrowsError(try Option(value: 20))
     }
 }

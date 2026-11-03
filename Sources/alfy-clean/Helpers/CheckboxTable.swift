@@ -57,6 +57,8 @@ struct CheckboxTableRow {
     var isApproximate = false
     /// The size is a ceiling because the user picks items next: the total shows "up to".
     var isUpperBound = false
+    /// A caution shown in yellow under the risk line, e.g. what must be closed first. Not cut off in the compact layouts.
+    var warning: String?
     var summary: String
     var facts: [(label: String, value: String)]
 }
@@ -211,6 +213,12 @@ struct CheckboxTableLayout {
         return lines
     }
 
+    /// The row's caution, in yellow, wrapped to `maxLines`.
+    private func warningLines(_ row: CheckboxTableRow, width: Int, maxLines: Int) -> [String] {
+        guard let warning = row.warning else { return [] }
+        return wrap("! " + warning, width: width, maxLines: maxLines).map { paint($0, .yellow) }
+    }
+
     /// The focused row: name, size, risk, what it does and the facts.
     /// `roomy` adds blank lines and small headings, `compact` puts each fact on one line,
     /// `minimal` is just name and size, the risk and one line of what it does.
@@ -221,6 +229,7 @@ struct CheckboxTableLayout {
             let size = row.size
             out.append(paint(fit(row.name, max(width - size.count - 2, 1)), .bold) + "  " + dim(size))
             out += riskLines(row)
+            out += warningLines(row, width: width, maxLines: 2)
             out += wrap(row.summary, width: width, maxLines: 1)
             return out
         }
@@ -230,6 +239,8 @@ struct CheckboxTableLayout {
         out += riskLines(row)
 
         if style == .roomy {
+            if row.warning != nil { out.append("") }
+            out += warningLines(row, width: width, maxLines: 4)
             out.append("")
             out.append(dim("WHAT IT DOES"))
             out += wrap(row.summary, width: width, maxLines: 3)
@@ -239,6 +250,7 @@ struct CheckboxTableLayout {
                 out += wrap(fact.value, width: width, maxLines: 2)
             }
         } else {
+            out += warningLines(row, width: width, maxLines: 3)
             out += wrap(row.summary, width: width, maxLines: 2)
             let labelWidth = 11
             for fact in row.facts {

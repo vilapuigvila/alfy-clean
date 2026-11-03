@@ -58,11 +58,19 @@ struct Clean: ParsableCommand {
     /// One pass of menu → confirm → clean. False when nothing ran (nothing picked, or declined).
     private mutating func runMenuJob() throws -> Bool {
 
-        let optionInputs = try pickOptions()
+        var optionInputs = try pickOptions()
 
         if optionInputs.isEmpty {
             Print.withColor(.yellow, "Cancelled.")
             return false
+        }
+
+        // Claude Code's session folders are never deleted under a running session; the other rows go on.
+        if optionInputs.contains(.claudeSessionFolders),
+           let refusal = ClaudeSessionFolders.refusal(running: ClaudeSessionFolders.runningSessionCount()) {
+            Print.withColor(.red, refusal)
+            optionInputs.removeAll { $0 == .claudeSessionFolders }
+            if optionInputs.isEmpty { return true }
         }
 
         let needConfirmation = optionInputs.filter { $0.needsConfirmation }
@@ -156,7 +164,7 @@ struct Clean: ParsableCommand {
         } else {
             let entries = menuEntries()
             // Measuring sizes can take a while: tell the user the menu is ready.
-            sendNotification(message: "Choose what to clean")
+            sendNotification(message: "Choose what to clean", sound: NotificationSound.menuReadyStyle)
             let picked = Prompt().checkboxTable(entries.map { $0.row }, question: try checkboxMessage())
             // Run in menu-definition order, not size order.
             let inputs = picked.map { entries[$0].input }.sorted { $0.rawValue < $1.rawValue }
@@ -196,6 +204,10 @@ struct Clean: ParsableCommand {
 
     /// The option's title, followed by the folders it will delete when they are found at runtime.
     private func titleLines(for optionInput: OptionInput) -> [String] {
+        if optionInput == .claudeSessionFolders {
+            return [optionInput.title] + ClaudeSessionFolders.folders().map { "    \($0.terminalSafe)" }
+                + ["    ⚠️  \(ClaudeSessionFolders.warning)"]
+        }
         guard optionInput == .derivedData else { return [optionInput.title] }
         return [optionInput.title] + (derivedDataFolders ?? DerivedDataDiscovery.found).map { "    \($0.terminalSafe)" }
     }
@@ -224,6 +236,8 @@ struct Clean: ParsableCommand {
             try deleteLargeCacheFolders()
         case .deleteSimulators:
             try deleteSelectedSimulators()
+        case .claudeSessionFolders:
+            try deleteClaudeSessionFolders()
         case .derivedData:
             try deleteDerivedData(derivedDataFolders ?? DerivedDataDiscovery.found)
             sendNotification(message: "\(optionInput.title) cleaned")
@@ -442,6 +456,36 @@ struct Clean: ParsableCommand {
             }
         }
         sendNotification(message: "Simulators deleted")
+    }
+
+    /// Deletes Claude Code's `claude-*` folders in /private/tmp, re-checking each one right before.
+    private func deleteClaudeSessionFolders() throws {
+        // A session may have started since the confirmation (`all` and `-d` come here too): check again.
+        if let refusal = ClaudeSessionFolders.refusal(running: ClaudeSessionFolders.runningSessionCount()) {
+            Print.withColor(.red, refusal)
+            return
+        }
+        let folders = ClaudeSessionFolders.folders()
+        guard !folders.isEmpty else {
+            Print.withColor(.yellow, "No Claude Code session folders found in \(ClaudeSessionFolders.defaultRoot).")
+            return
+        }
+        for folder in folders {
+            let name = (folder as NSString).lastPathComponent.terminalSafe
+            guard ClaudeSessionFolders.isSafeToDeleteNow(folder) else {
+                Print.withColor(.red, "Skipped \(name): not one of your plain claude-* folders in \(ClaudeSessionFolders.defaultRoot) any more")
+                continue
+            }
+            do {
+                try runWithLoader("Deleting \(name)") {
+                    try FileManager.default.removeItem(atPath: folder)
+                }
+                Print.withColor(.green, "Deleted \(name)")
+            } catch {
+                Print.withColor(.red, "Failed to delete \(name): \(error)")
+            }
+        }
+        sendNotification(message: "Claude Code session files cleaned")
     }
 
     /// Lets the user pick which folders over 1 GB directly inside ~/Library/Caches to delete.
@@ -756,38 +800,38 @@ struct Clean: ParsableCommand {
 
     /// Homebrew's terminal-notifier, looked up by absolute path so a broken shim earlier on PATH
     /// (e.g. the Intel-only rbenv gem) can't shadow it.
-    private static let terminalNotifierPaths = [
-        "/opt/homebrew/bin/terminal-notifier",
-        "/usr/local/bin/terminal-notifier"
-    ]
-
-    /// Sends a macOS system notification with a custom message and sound.
+    /// Sends a macOS system notification with a custom message, plus alfy-clean's own sound (see `NotificationSound`): the plain funk groove when the menu is ready, the reversed detuned one when a row has finished.
     /// Prefers terminal-notifier so tapping the notification returns to the terminal that ran alfy-clean: the app
     /// (its bundle ID comes from `__CFBundleIdentifier`) and, in Ghostty, the exact tab (see `TerminalFocus`); falls back to osascript, whose notifications
     /// open Script Editor on tap.
     /// Returns immediately without waiting for user interaction.
     /// Silently ignores all errors (notifier unavailable, permission denied, etc.)
     /// since notifications are non-critical to the main task.
-    private func sendNotification(message: String) {
-        if let notifier = Self.terminalNotifierPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            var arguments = ["-title", "alfy-clean", "-message", message, "-sound", "Glass"]
-            if let terminalBundleID = ProcessInfo.processInfo.environment["__CFBundleIdentifier"] {
-                arguments += ["-activate", terminalBundleID]
-            }
-            // Tapping it returns to the exact terminal tab that ran alfy-clean, not just the terminal app.
-            if let focusCommand = TerminalFocus.clickCommand {
-                arguments += ["-execute", focusCommand]
-            }
-            runProcess(notifier, arguments)
-        } else {
-            // The message is passed as an argument to the script, never spliced into its source.
-            runProcess("/usr/bin/osascript", [
-                "-e", "on run argv",
-                "-e", "display notification (item 1 of argv) with title \"alfy-clean\" sound name \"Glass\"",
-                "-e", "end run",
-                message
-            ])
+    private func sendNotification(message: String, sound: NotificationSound.Style = NotificationSound.notificationStyle) {
+        defer { NotificationSound.play(style: sound) }
+        var arguments = ["-title", "alfy-clean", "-message", message]
+        if let terminalBundleID = ProcessInfo.processInfo.environment["__CFBundleIdentifier"] {
+            arguments += ["-activate", terminalBundleID]
         }
+        // Tapping it returns to the exact terminal tab that ran alfy-clean, not just the terminal app.
+        if let focusCommand = TerminalFocus.clickCommand {
+            arguments += ["-execute", focusCommand]
+        }
+        // The first notifier that posts it wins. macOS may have the logo copy's notifications turned off (it says so
+        // and posts nothing), and then the next one is used.
+        // The logo copy is built on first use (see `NotificationApp`); Homebrew's own terminal-notifier comes after it.
+        let notifiers = [NotificationApp.executablePath()].compactMap { $0 } + NotificationApp.homebrewNotifierPaths
+        for notifier in notifiers where FileManager.default.isExecutableFile(atPath: notifier) {
+            let result = runProcess(notifier, arguments)
+            if result.success && !result.output.contains("turned off") { return }
+        }
+        // The message is passed as an argument to the script, never spliced into its source.
+        runProcess("/usr/bin/osascript", [
+            "-e", "on run argv",
+            "-e", "display notification (item 1 of argv) with title \"alfy-clean\"",
+            "-e", "end run",
+            message
+        ])
     }
 
     /// Sends a notification for scan completion (used by listLargeSystemFolders).
@@ -821,6 +865,7 @@ extension Clean {
         case swiftPMCache                   // SwiftPM package cache (~/Library/Caches/org.swift.swiftpm)
         case userCaches                     // Pick big folders (> 1 GB) directly inside ~/Library/Caches
         case deleteSimulators               // ⚠️ Pick simulators to delete for good (must be recreated)
+        case claudeSessionFolders           // ⚠️ Claude Code's /private/tmp/claude-* folders (all sessions must be closed)
         init(value: Int) throws {
             switch value {
             case 0: self = .noDerivedData
@@ -842,6 +887,7 @@ extension Clean {
             case 16: self = .swiftPMCache
             case 17: self = .userCaches
             case 18: self = .deleteSimulators
+            case 19: self = .claudeSessionFolders
             default: throw "Manage this case \(value)"
             }
         }
@@ -868,6 +914,7 @@ extension Clean {
             case .swiftPMCache: return "📦 SwiftPM cache"
             case .userCaches: return "🗂️ Big folders in ~/Library/Caches"
             case .deleteSimulators: return "⚠️  Delete simulators (gone, must be recreated)"
+            case .claudeSessionFolders: return "🤖 Claude Code session folders (/private/tmp/claude-*)"
             }
         }
 
@@ -912,7 +959,14 @@ extension Clean {
                 return "Lists the folders over 1 GB in ~/Library/Caches and lets you tick which to delete. Apps rebuild them."
             case .deleteSimulators:
                 return "Lets you pick simulators and deletes them with simctl. They are gone and must be created again to be used."
+            case .claudeSessionFolders:
+                return "Deletes the claude-* folders Claude Code keeps in /private/tmp: session scratchpads, task output and pasted images. Claude Code recreates them."
             }
+        }
+
+        /// A caution for the info panel; nil when the row needs none.
+        var warningDescription: String? {
+            self == .claudeSessionFolders ? ClaudeSessionFolders.warning : nil
         }
 
         /// Kept in the code (and reachable with `-d <n>` / `all`) but not offered in the interactive menu.
@@ -920,6 +974,9 @@ extension Clean {
             switch self {
             case .noDerivedData, .microsoftTeamsCache, .messagesAttachments, .trash:
                 return true
+            case .claudeSessionFolders:
+                // Only offered when Claude Code has left something behind.
+                return ClaudeSessionFolders.folders().isEmpty
             case .maestroTests:
                 // Only offered when Maestro has left something behind.
                 return !FileManager.default.fileExists(atPath: expandTilde("~/.maestro/tests"))
@@ -954,6 +1011,7 @@ extension Clean {
             case .swiftPMCache: return "SwiftPM cache"
             case .userCaches: return "Caches > 1 GB"
             case .deleteSimulators: return "Delete simulators"
+            case .claudeSessionFolders: return "Claude Code session files"
             }
         }
 
@@ -964,7 +1022,7 @@ extension Clean {
                  .homebrewCache, .maestroTests, .claudeJobsTmp, .swiftPMCache:
                 return .safe
             case .simultorsData, .deviceSupport, .simulatorRuntimes, .userCaches, .deleteSimulators: return .pick
-            case .archives, .trash: return .final
+            case .archives, .trash, .claudeSessionFolders: return .final
             case .microsoftTeamsCache: return .slow
             case .messagesAttachments, .largeSystemFolders: return .look
             }
@@ -972,12 +1030,13 @@ extension Clean {
 
         /// Menu section, in display order: Xcode and iOS first.
         enum Category: Int {
-            case xcodeIOS, caches, systemAndApps
+            case xcodeIOS, caches, ai, systemAndApps
 
             var title: String {
                 switch self {
                 case .xcodeIOS: return "Xcode & iOS"
                 case .caches: return "Caches"
+                case .ai: return "AI"
                 case .systemAndApps: return "System & apps"
                 }
             }
@@ -989,8 +1048,10 @@ extension Clean {
                  .deviceSupport, .simulatorRuntimes, .simultorsData, .clonedSimulatorsData, .maestroTests,
                  .deleteSimulators:
                 return .xcodeIOS
-            case .homebrewCache, .claudeJobsTmp, .swiftPMCache, .userCaches:
+            case .homebrewCache, .swiftPMCache, .userCaches:
                 return .caches
+            case .claudeJobsTmp, .claudeSessionFolders:
+                return .ai
             case .trash, .largeSystemFolders, .messagesAttachments, .microsoftTeamsCache:
                 return .systemAndApps
             }
@@ -1024,6 +1085,7 @@ extension Clean {
             case .swiftPMCache: return "~/Library/Caches/org.swift.swiftpm"
             case .userCaches: return "The folders over 1 GB in ~/Library/Caches that you tick"
             case .deleteSimulators: return "The simulator devices you tick, through simctl"
+            case .claudeSessionFolders: return "Every claude-* folder in /private/tmp that is yours (Claude Code scratchpads, task output, pasted images)"
             }
         }
 
@@ -1048,6 +1110,7 @@ extension Clean {
             case .swiftPMCache: return "Yes, packages download again"
             case .userCaches: return "Yes, apps rebuild their caches; a few may sign you out or re-download data"
             case .deleteSimulators: return "No: create them again in Xcode ▸ Window ▸ Devices and Simulators"
+            case .claudeSessionFolders: return "Claude Code recreates the folders; what a running session kept in them is lost"
             }
         }
 
@@ -1063,7 +1126,7 @@ extension Clean {
 
         var runsInAllCleanup: Bool {
             self != .largeSystemFolders && self != .simulatorRuntimes && self != .homebrewCache && self != .deviceSupport && self != .claudeJobsTmp
-                && self != .userCaches && self != .deleteSimulators
+                && self != .userCaches && self != .deleteSimulators && self != .claudeSessionFolders
         }
 
         /// Deletes without a prompt of its own. Simulators, DeviceSupport, runtimes and the large-folder scan
@@ -1147,6 +1210,8 @@ extension Clean {
                 return ["~/Library/Caches/org.swift.swiftpm"]
             case .userCaches:
                 return UserCaches.rootFolders()
+            case .claudeSessionFolders:
+                return ClaudeSessionFolders.folders()
             case .simulatorRuntimes, .largeSystemFolders:
                 return []
             }
@@ -1222,6 +1287,7 @@ extension Clean {
             case .swiftPMCache: return Self.remove("~/Library/Caches/org.swift.swiftpm")
             case .userCaches: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             case .deleteSimulators: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
+            case .claudeSessionFolders: throw "🔥 `\(self.rawValue)` Doesn't have a shell command"
             }
         }
     }
@@ -1282,6 +1348,7 @@ private extension Clean {
                 isWarning: optionInput == .deleteSimulators,
                 isApproximate: isApproximate,
                 isUpperBound: optionInput.picksItemsNext,
+                warning: optionInput.warningDescription,
                 summary: optionInput.actionDescription,
                 facts: [
                     ("Deletes", optionInput.deletesDescription),
@@ -1291,7 +1358,6 @@ private extension Clean {
             ))
         }
 
-        // By category (Xcode & iOS first), then biggest first; ties keep menu order.
         return entries.enumerated()
             .sorted { lhs, rhs in
                 let (a, b) = (lhs.element, rhs.element)
