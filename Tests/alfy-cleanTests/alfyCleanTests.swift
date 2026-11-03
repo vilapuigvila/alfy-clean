@@ -30,7 +30,7 @@ final class alfyCleanTests: XCTestCase {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let output = String(data: data, encoding: .utf8)
 
-        XCTAssertEqual(output, "alfy-clean version 0.1.0\n")
+        XCTAssertEqual(output, "alfy-clean version 0.2.0\n")
         #endif
     }
 

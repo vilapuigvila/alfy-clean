@@ -13,7 +13,7 @@ alfy-clean is a command-line helper for macOS that frees disk space used by Xcod
 - Free-space report after each cleanup, measured from the disk before and after.
 - A yes/no prompt before every deletion. It names what will be removed.
 - Non-interactive modes: `alfy-clean all` and `alfy-clean -d <n>`.
-- macOS notifications when a cleanup step finishes. They use `terminal-notifier` if it is installed and `osascript` otherwise.
+- macOS notifications when a cleanup step finishes. They use `terminal-notifier` if it is installed and `osascript` otherwise (when terminal-notifier is installed, the first notification also builds a copy of it with the alfy-clean logo as its icon, in `~/.local/share/alfy-clean/`; macOS asks once to allow that copy's notifications), and each one plays a short synthesized bass groove with `afplay` (generated in code, cached in `~/Library/Caches/alfy-clean/`): the plain groove when the menu is ready to choose from, and the same groove played backwards and tuned down 2 semitones when a row has finished.
 
 ## Requirements
 
@@ -143,6 +143,7 @@ Runs the option with number `n` once, without the menu. Options that delete ask 
 | 16 | SwiftPM cache | `~/Library/Caches/org.swift.swiftpm` | Yes |
 | 17 | Big folders in `~/Library/Caches` | The folders over 1 GB directly inside `~/Library/Caches` that you tick | Yes |
 | 18 | Delete simulators | The simulators you tick, removed for good with `simctl delete`. Running ones are shut down first. They must be created again to be used. | Yes |
+| 19 | Claude Code session files | The `claude-*` folders you own directly inside `/private/tmp` (Claude Code's session scratchpads, task output and pasted images), in their own AI section. Close every Claude Code session first: deleting them while one is running can lose its session data. It refuses to run while any Claude Code process of yours is running (checked again right before deleting); the other ticked rows still run. The confirmation lists the folders. Never part of `all`. | Yes, only when such folders exist |
 
 <img width="1048" height="625" alt="image" src="https://github.com/user-attachments/assets/959fc12f-c100-46e6-922d-c2da9dc8df6a" />
 
