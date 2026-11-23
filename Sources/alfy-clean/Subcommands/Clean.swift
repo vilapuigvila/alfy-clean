@@ -162,12 +162,20 @@ struct Clean: ParsableCommand {
             option = shortOption
             return [try OptionInput(value: option)]
         } else {
-            let entries = menuEntries()
+            guard let snapshot = try makeMenuSnapshot(showLoader: true) else { throw "Unable to read system storage info" }
             // Measuring sizes can take a while: tell the user the menu is ready.
             sendNotification(message: "Choose what to clean", sound: NotificationSound.menuReadyStyle)
-            let picked = Prompt().checkboxTable(entries.map { $0.row }, question: try checkboxMessage())
+            // The open menu re-measures itself (hourly, or on `r`); the background measurement stays silent.
+            let measurer = self
+            let autoRefresh = MenuAutoRefresh(
+                measure: { try? measurer.makeMenuSnapshot(showLoader: false) ?? nil },
+                didRefresh: { old, new in
+                    measurer.sendNotification(message: refreshNotificationMessage(busyBefore: old.busyBytes, busyAfter: new.busyBytes))
+                }
+            )
+            let picked = Prompt().checkboxTable(snapshot, autoRefresh: autoRefresh)
             // Run in menu-definition order, not size order.
-            let inputs = picked.map { entries[$0].input }.sorted { $0.rawValue < $1.rawValue }
+            let inputs = picked.compactMap { OptionInput(rawValue: $0) }.sorted { $0.rawValue < $1.rawValue }
             if inputs.contains(.derivedData) {
                 derivedDataFolders = try pickDerivedDataFolders()
             }
@@ -1310,8 +1318,8 @@ private extension Clean {
     }
 
     /// The visible options as menu rows, grouped by category and biggest first within each.
-    func menuEntries() -> [MenuEntry] {
-        let estimatesByPath = diskUsageEstimatesByPath()
+    func menuEntries(showLoader: Bool = true) -> [MenuEntry] {
+        let estimatesByPath = diskUsageEstimatesByPath(showLoader: showLoader)
         let runtimesBytes = SimulatorRuntimes.list().reduce(0) { $0 + $1.sizeBytes }
 
         let entries = OptionInput.menuOptions.map { optionInput -> MenuEntry in
@@ -1368,6 +1376,27 @@ private extension Clean {
             .map { $0.element }
     }
 
+    /// Measures everything the main menu shows. `showLoader` is false for the background refresh, which must not
+    /// write to the terminal. Nil when the disk's size can't be read.
+    func makeMenuSnapshot(showLoader: Bool) throws -> MenuSnapshot? {
+        let entries = menuEntries(showLoader: showLoader)
+        guard let busy = busyBytes() else { return nil }
+        return MenuSnapshot(
+            ids: entries.map { $0.input.rawValue },
+            rows: entries.map { $0.row },
+            question: try checkboxMessage(),
+            busyBytes: busy,
+            measuredAt: Date()
+        )
+    }
+
+    func busyBytes() -> UInt64? {
+        guard let attributes = try? FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory()),
+              let capacity = attributes[.systemSize] as? NSNumber,
+              let free = attributes[.systemFreeSize] as? NSNumber else { return nil }
+        return capacity.uint64Value &- free.uint64Value
+    }
+
     func checkboxMessage() throws -> String {
         let systemStorage = try systemStorageMessage()
         return """
@@ -1398,15 +1427,15 @@ private extension Clean {
 
     typealias DiskUsageEstimate = DiskUsage
 
-    func diskUsageEstimatesByPath() -> [String: DiskUsageEstimate] {
+    func diskUsageEstimatesByPath(showLoader: Bool = true) -> [String: DiskUsageEstimate] {
         let uniquePaths = Array(Set(OptionInput.menuOptions.flatMap { $0.estimatedPaths }))
-        let loader = TerminalLoader()
-        loader.start()
+        let loader = showLoader ? TerminalLoader() : nil
+        loader?.start()
         // Cloned simulators share blocks with their source device: count only what deleting them frees.
         let cloned = uniquePaths.filter { DiskUsage.cloneFolders.contains($0) }
         var result = DiskUsage.measure(paths: uniquePaths.filter { !cloned.contains($0) })
         result.merge(DiskUsage.measureReclaimable(paths: cloned)) { _, reclaimable in reclaimable }
-        loader.succeed()
+        loader?.succeed()
         return result
     }
 

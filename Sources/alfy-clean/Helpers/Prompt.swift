@@ -221,6 +221,34 @@ final class Prompt {
         return picked ?? lineInputCheckboxTable(rows, question: question)
     }
 
+    /// The main menu: like `checkboxTable`, but it re-measures itself in the background (hourly or on `r`) and
+    /// keeps ticks and focus on the same options. Returns the picked option ids.
+    func checkboxTable(_ snapshot: MenuSnapshot, autoRefresh: MenuAutoRefresh?) -> [Int] {
+        guard !snapshot.rows.isEmpty else { return [] }
+        guard isatty(STDIN_FILENO) != 0 else {
+            return lineInputCheckboxTable(snapshot.rows, question: snapshot.question).map { snapshot.ids[$0] }
+        }
+        guard let autoRefresh else {
+            return checkboxTable(snapshot.rows, question: snapshot.question).map { snapshot.ids[$0] }
+        }
+
+        let controller = MenuRefreshController(snapshot: snapshot, config: autoRefresh)
+        let hooks = SelectionLoopHooks(
+            count: { controller.snapshot.rows.count },
+            onTick: { focused, selected in controller.tick(focused: &focused, selected: &selected) },
+            onKey: { byte in byte == CharacterKey.r && controller.startRefresh() }
+        )
+        let picked = runSelectionLoop(count: snapshot.rows.count, hooks: hooks) { focusedIndex, selectedIndexes in
+            let current = controller.snapshot
+            return CheckboxTableLayout(rows: current.rows, question: current.question, size: terminalSize(), status: controller.status)
+                .lines(focused: focusedIndex, selected: selectedIndexes)
+        }
+        guard let picked else {
+            return lineInputCheckboxTable(snapshot.rows, question: snapshot.question).map { snapshot.ids[$0] }
+        }
+        return picked.map { controller.snapshot.ids[$0] }
+    }
+
     private func lineInputCheckboxTable(_ rows: [CheckboxTableRow], question: String?) -> [Int] {
         checkboxOptions(
             Array(rows.indices),
@@ -237,11 +265,14 @@ final class Prompt {
         count: Int,
         preselected: Set<Int> = [],
         singleChoice: Bool = false,
+        hooks: SelectionLoopHooks? = nil,
         draw: (_ focused: Int, _ selected: Set<Int>) -> [String]
     ) -> [Int]? {
         var selectedIndexes = preselected
         var focusedIndex = 0
         var renderedLineCount = 0
+        // The row count can change when a menu refreshes itself.
+        func rowCount() -> Int { hooks?.count() ?? count }
 
         guard let rawMode = TerminalRawMode() else { return nil }
         terminalWasResized = 0
@@ -267,6 +298,7 @@ final class Prompt {
         render()
 
         while true {
+            if let hooks, hooks.onTick(&focusedIndex, &selectedIndexes) { render() }
             // Wait for a key, but wake up when the window or font size changes so the layout is redrawn to fit.
             guard waitForInput(milliseconds: 200) else {
                 if terminalWasResized != 0 {
@@ -277,10 +309,10 @@ final class Prompt {
             }
             switch readTerminalKey() {
             case .up:
-                focusedIndex = focusedIndex == 0 ? count - 1 : focusedIndex - 1
+                focusedIndex = focusedIndex == 0 ? rowCount() - 1 : focusedIndex - 1
                 render()
             case .down:
-                focusedIndex = focusedIndex == count - 1 ? 0 : focusedIndex + 1
+                focusedIndex = focusedIndex == rowCount() - 1 ? 0 : focusedIndex + 1
                 render()
             case .space:
                 if selectedIndexes.contains(focusedIndex) {
@@ -297,10 +329,12 @@ final class Prompt {
                 writeTerminal("\n")
                 return []
             case .character(let byte) where byte == CharacterKey.k:
-                focusedIndex = focusedIndex == 0 ? count - 1 : focusedIndex - 1
+                focusedIndex = focusedIndex == 0 ? rowCount() - 1 : focusedIndex - 1
                 render()
             case .character(let byte) where byte == CharacterKey.j:
-                focusedIndex = focusedIndex == count - 1 ? 0 : focusedIndex + 1
+                focusedIndex = focusedIndex == rowCount() - 1 ? 0 : focusedIndex + 1
+                render()
+            case .character(let byte) where hooks?.onKey(byte) == true:
                 render()
             case .unknown, .character:
                 continue
@@ -354,6 +388,15 @@ final class Prompt {
     }
 }
 
+/// Optional extras for `runSelectionLoop` (nil for every picker except the self-refreshing main menu).
+private struct SelectionLoopHooks {
+    let count: () -> Int
+    /// Called on every wake, before waiting for a key. Returns true to redraw.
+    let onTick: (_ focused: inout Int, _ selected: inout Set<Int>) -> Bool
+    /// Called for a character key the loop doesn't handle itself. Returns true to redraw.
+    let onKey: (UInt8) -> Bool
+}
+
 private enum TerminalKey {
     case up
     case down
@@ -374,6 +417,7 @@ private enum CharacterKey {
     static let j: UInt8 = 106
     static let k: UInt8 = 107
     static let q: UInt8 = 113
+    static let r: UInt8 = 114
 }
 
 private final class TerminalRawMode {

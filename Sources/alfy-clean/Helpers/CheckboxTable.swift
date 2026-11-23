@@ -71,6 +71,8 @@ struct CheckboxTableLayout {
     let rows: [CheckboxTableRow]
     let question: String?
     let size: (rows: Int, columns: Int)
+    /// Shown at the end of the hint line (and adds the `r refresh` key); nil keeps the plain hint.
+    var status: String? = nil
 
     private enum InspectorStyle { case roomy, compact, minimal }
     private typealias Level = (fullQuestion: Bool, headings: Bool, inspector: InspectorStyle)
@@ -103,6 +105,11 @@ struct CheckboxTableLayout {
         return frame
     }
 
+    private var hint: String {
+        guard let status else { return "↑/↓ move  •  space select  •  enter confirm  •  q cancel" }
+        return "↑/↓ move  •  space select  •  r refresh  •  enter confirm  •  q cancel   \(status)"
+    }
+
     // MARK: Frame
 
     private func build(_ level: Level, focused: Int, selected: Set<Int>) -> [String] {
@@ -121,7 +128,7 @@ struct CheckboxTableLayout {
                 out.append(last)
             }
         }
-        out.append(dim("↑/↓ move  •  space select  •  enter confirm  •  q cancel"))
+        out.append(dim(hint))
         if level.fullQuestion { out.append("") }
 
         let list = listCells(focused: focused, selected: selected, showHeadings: level.headings)
