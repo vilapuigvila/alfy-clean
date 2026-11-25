@@ -899,7 +899,10 @@ extension Clean {
             default: throw "Manage this case \(value)"
             }
         }
-        init?(rawValue: Int) { fatalError("use `init(value: Int) throws`") }
+        init?(rawValue: Int) {
+            guard let input = try? OptionInput(value: rawValue) else { return nil }
+            self = input
+        }
 
         var title: String {
             switch self {

@@ -80,10 +80,31 @@ final class Prompt {
             return " (default: \(mapping[defaultAnswer]!))"
         }
         
+        // In a terminal, a single y/n key answers at once: no Enter needed.
+        let singleKey = TestableReadLineFunction == nil && isatty(STDIN_FILENO) == 1
         while true {
             // print prompt
             customPrint(Prompt.yesOrNoPrompt + defaultText(), terminator: " > ")
-            
+
+            if singleKey, let key = readSingleKeyInRawMode() {
+                switch key {
+                case CharacterKey.enter, CharacterKey.carriageReturn:
+                    if let defaultAnswer = defaultAnswer {
+                        customPrint("")
+                        return defaultAnswer
+                    }
+                    continue
+                case CharacterKey.y, CharacterKey.capitalY:
+                    customPrint("y")
+                    return true
+                case CharacterKey.n, CharacterKey.capitalN:
+                    customPrint("n")
+                    return false
+                default:
+                    continue
+                }
+            }
+
             // parse answer
             guard let answer = customReadline(true)?.trim.lowercased() else {
                 fatalError("EOF?")
@@ -418,6 +439,18 @@ private enum CharacterKey {
     static let k: UInt8 = 107
     static let q: UInt8 = 113
     static let r: UInt8 = 114
+    static let y: UInt8 = 121
+    static let capitalY: UInt8 = 89
+    static let n: UInt8 = 110
+    static let capitalN: UInt8 = 78
+}
+
+/// Reads one key without waiting for Enter. Nil when the terminal can't be put in raw mode or the read fails.
+private func readSingleKeyInRawMode() -> UInt8? {
+    guard let rawMode = TerminalRawMode() else { return nil }
+    defer { rawMode.restore() }
+    let data = FileHandle.standardInput.readData(ofLength: 1)
+    return data.first
 }
 
 private final class TerminalRawMode {
