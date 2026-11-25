@@ -73,6 +73,14 @@ func refreshStatusText(isRefreshing: Bool, updatedAt: Date, calendar: Calendar =
     return String(format: "updated %02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
 }
 
+/// The animated line shown while a refresh runs: the same spinner and playful words as the loader at start-up.
+func refreshLoaderLine(frame: Int, word: String) -> String {
+    let frames = TerminalLoader.spinnerFrames
+    let spinner = frames[((frame % frames.count) + frames.count) % frames.count]
+    return "\(Print.Color.cyan.rawValue)\(spinner)\(Print.Color.reset.rawValue) "
+        + TerminalLoader.styledThinkingMessage(word: word)
+}
+
 /// Hands one background result to the key-loop thread.
 final class RefreshResultBox<Value> {
     private let lock = NSLock()
@@ -101,6 +109,10 @@ final class MenuRefreshController {
     private var lastMeasured: Date
     private var box: RefreshResultBox<MenuSnapshot>?
     private let now: () -> Date
+    private var frame = 0
+    private var word = TerminalLoader.thinkingWords.randomElement() ?? "Thinking"
+    private var wordChangedAt = Date()
+    private let wordInterval: TimeInterval = 3
 
     init(snapshot: MenuSnapshot, config: MenuAutoRefresh, now: @escaping () -> Date = Date.init) {
         self.snapshot = snapshot
@@ -115,12 +127,23 @@ final class MenuRefreshController {
         refreshStatusText(isRefreshing: isRefreshing, updatedAt: snapshot.measuredAt)
     }
 
+    /// The loader line to show in place of the hint while refreshing; nil otherwise.
+    var loaderLine: String? {
+        isRefreshing ? refreshLoaderLine(frame: frame, word: word) : nil
+    }
+
+    /// How long the key loop may sleep: short while the spinner animates.
+    var pollMilliseconds: Int32 { isRefreshing ? 100 : 200 }
+
     /// Starts a refresh unless one is already running.
     @discardableResult
     func startRefresh() -> Bool {
         guard box == nil else { return false }
         let newBox = RefreshResultBox<MenuSnapshot>()
         box = newBox
+        frame = 0
+        word = TerminalLoader.thinkingWords.randomElement() ?? word
+        wordChangedAt = now()
         let measure = config.measure
         DispatchQueue.global(qos: .utility).async { newBox.put(measure()) }
         return true
@@ -139,6 +162,15 @@ final class MenuRefreshController {
                 focused = mapped.focused
                 snapshot = new
                 config.didRefresh(old, new)
+            }
+            return true
+        }
+        if isRefreshing {
+            // Still measuring: advance the spinner and rotate the word every few seconds.
+            frame += 1
+            if now().timeIntervalSince(wordChangedAt) >= wordInterval {
+                wordChangedAt = now()
+                word = TerminalLoader.thinkingWords.filter { $0 != word }.randomElement() ?? word
             }
             return true
         }

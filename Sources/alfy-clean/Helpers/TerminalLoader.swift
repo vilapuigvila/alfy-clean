@@ -28,13 +28,19 @@ final class TerminalLoader {
 
     private var styledMessage: String {
         guard fixedMessage == nil else { return message }
+        return Self.styledThinkingMessage(word: word)
+    }
+
+    /// The colored "<word> Nope 🤣 - I'm processing my friend" text, shared with the menu's refresh status.
+    static func styledThinkingMessage(word: String) -> String {
         let reset = Print.Color.reset.rawValue
         let white = Print.Color.white.rawValue
-        return "\(Self.orange)\(word)\(reset) \(white)Nope 🤣 - I'm\(reset) "
+        return "\(orange)\(word)\(reset) \(white)Nope 🤣 - I'm\(reset) "
             + "\(Print.Color.green.rawValue)processing\(reset) \(white)my friend\(reset)"
     }
 
-    private let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    static let spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    private var frames: [String] { Self.spinnerFrames }
     private let queue = DispatchQueue(label: "alfy-clean.terminal-loader")
     private let isInteractive = isatty(STDOUT_FILENO) != 0
     private let displayDelay: TimeInterval = 1

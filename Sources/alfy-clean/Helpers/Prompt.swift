@@ -257,11 +257,12 @@ final class Prompt {
         let hooks = SelectionLoopHooks(
             count: { controller.snapshot.rows.count },
             onTick: { focused, selected in controller.tick(focused: &focused, selected: &selected) },
-            onKey: { byte in byte == CharacterKey.r && controller.startRefresh() }
+            onKey: { byte in byte == CharacterKey.r && controller.startRefresh() },
+            pollMilliseconds: { controller.pollMilliseconds }
         )
         let picked = runSelectionLoop(count: snapshot.rows.count, hooks: hooks) { focusedIndex, selectedIndexes in
             let current = controller.snapshot
-            return CheckboxTableLayout(rows: current.rows, question: current.question, size: terminalSize(), status: controller.status)
+            return CheckboxTableLayout(rows: current.rows, question: current.question, size: terminalSize(), status: controller.status, loader: controller.loaderLine)
                 .lines(focused: focusedIndex, selected: selectedIndexes)
         }
         guard let picked else {
@@ -321,7 +322,7 @@ final class Prompt {
         while true {
             if let hooks, hooks.onTick(&focusedIndex, &selectedIndexes) { render() }
             // Wait for a key, but wake up when the window or font size changes so the layout is redrawn to fit.
-            guard waitForInput(milliseconds: 200) else {
+            guard waitForInput(milliseconds: hooks?.pollMilliseconds() ?? 200) else {
                 if terminalWasResized != 0 {
                     terminalWasResized = 0
                     render()
@@ -416,6 +417,8 @@ private struct SelectionLoopHooks {
     let onTick: (_ focused: inout Int, _ selected: inout Set<Int>) -> Bool
     /// Called for a character key the loop doesn't handle itself. Returns true to redraw.
     let onKey: (UInt8) -> Bool
+    /// How long to wait for a key before the next wake.
+    var pollMilliseconds: () -> Int32 = { 200 }
 }
 
 private enum TerminalKey {

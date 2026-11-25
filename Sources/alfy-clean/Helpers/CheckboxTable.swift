@@ -73,6 +73,8 @@ struct CheckboxTableLayout {
     let size: (rows: Int, columns: Int)
     /// Shown at the end of the hint line (and adds the `r refresh` key); nil keeps the plain hint.
     var status: String? = nil
+    /// While a refresh runs: an animated loader line shown instead of the key hint (keys stay listed after it).
+    var loader: String? = nil
 
     private enum InspectorStyle { case roomy, compact, minimal }
     private typealias Level = (fullQuestion: Bool, headings: Bool, inspector: InspectorStyle)
@@ -106,6 +108,7 @@ struct CheckboxTableLayout {
     }
 
     private var hint: String {
+        if let loader { return "\(loader)\(C.dim.rawValue)  •  enter confirm  •  q cancel" }
         guard let status else { return "↑/↓ move  •  space select  •  enter confirm  •  q cancel" }
         return "↑/↓ move  •  space select  •  r refresh  •  enter confirm  •  q cancel   \(status)"
     }

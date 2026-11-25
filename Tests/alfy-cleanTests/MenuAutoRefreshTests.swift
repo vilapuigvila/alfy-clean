@@ -135,4 +135,57 @@ final class MenuAutoRefreshTests: XCTestCase {
         XCTAssertEqual(focused, 2)           // option 20 moved from 1 to 2
         XCTAssertEqual(notified.count, 1)
     }
+
+    // MARK: Refresh loader
+
+    func testLoaderLineUsesTheStartupSpinnerAndWords() {
+        let line = refreshLoaderLine(frame: 0, word: "Pondering")
+        XCTAssertTrue(line.contains(TerminalLoader.spinnerFrames[0]))
+        XCTAssertTrue(line.contains("Pondering"))
+        XCTAssertTrue(line.contains("processing"))
+        // The spinner advances and wraps around, including a negative frame.
+        XCTAssertTrue(refreshLoaderLine(frame: 1, word: "x").contains(TerminalLoader.spinnerFrames[1]))
+        XCTAssertTrue(refreshLoaderLine(frame: TerminalLoader.spinnerFrames.count, word: "x").contains(TerminalLoader.spinnerFrames[0]))
+        XCTAssertTrue(refreshLoaderLine(frame: -1, word: "x").contains(TerminalLoader.spinnerFrames.last!))
+    }
+
+    func testLoaderReplacesTheHintWhileRefreshingAtEveryLayoutLevel() {
+        let rows = (0..<12).map { row("Row \($0)") }
+        let loader = refreshLoaderLine(frame: 3, word: "Mulling")
+        for size in [(rows: 80, columns: 130), (rows: 24, columns: 100), (rows: 14, columns: 70), (rows: 8, columns: 60)] {
+            let frame = CheckboxTableLayout(rows: rows, question: "Q", size: size, status: "refreshing…", loader: loader)
+                .lines(focused: 0, selected: []).joined(separator: "\n")
+            XCTAssertTrue(frame.contains("Mulling"), "\(size)")
+            XCTAssertTrue(frame.contains("enter confirm  •  q cancel"), "\(size)")
+        }
+    }
+
+    func testControllerShowsAnAnimatedLoaderOnlyWhileRefreshing() {
+        let start = Date(timeIntervalSince1970: 0)
+        var clock = start
+        let gate = DispatchSemaphore(value: 0)
+        let config = MenuAutoRefresh(measure: { gate.wait(); return nil }, didRefresh: { _, _ in })
+        let controller = MenuRefreshController(snapshot: snapshot([1], busy: 1, at: start), config: config, now: { clock })
+        var focused = 0
+        var selected: Set<Int> = []
+
+        XCTAssertNil(controller.loaderLine)
+        XCTAssertEqual(controller.pollMilliseconds, 200)
+        XCTAssertTrue(controller.startRefresh())
+        let first = controller.loaderLine
+        XCTAssertNotNil(first)
+        XCTAssertEqual(controller.pollMilliseconds, 100)
+
+        clock = start.addingTimeInterval(0.2)
+        XCTAssertTrue(controller.tick(focused: &focused, selected: &selected))    // redraw to animate
+        XCTAssertNotEqual(controller.loaderLine, first)
+
+        gate.signal()
+        let deadline = Date().addingTimeInterval(5)
+        while controller.isRefreshing && Date() < deadline {
+            _ = controller.tick(focused: &focused, selected: &selected)
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        XCTAssertNil(controller.loaderLine)
+    }
 }
