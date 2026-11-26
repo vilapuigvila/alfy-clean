@@ -308,13 +308,17 @@ final class Prompt {
         writeTerminal("\u{001B}[?25l")
 
         func render() {
-            if renderedLineCount > 0 {
-                writeTerminal("\u{001B}[\(renderedLineCount)A")
-                writeTerminal("\u{001B}[J")
-            }
             let lines = draw(focusedIndex, selectedIndexes)
+            // One single write, no erase-then-draw: the terminal never paints a blank frame in between (this
+            // flashed when the loader redrew ten times a second). Each line is overwritten in place, the leftovers
+            // of a taller previous frame are cleared afterwards, and synchronized output (mode 2026, ignored by
+            // terminals that don't know it) makes the whole update appear at once.
+            var out = "\u{001B}[?2026h"
+            if renderedLineCount > 0 { out += "\u{001B}[\(renderedLineCount)A" }
+            out += "\r" + lines.map { "\u{001B}[2K" + $0 }.joined(separator: "\n") + "\n"
+            out += "\u{001B}[J\u{001B}[?2026l"
             renderedLineCount = lines.count
-            writeTerminal(lines.joined(separator: "\n") + "\n")
+            writeTerminal(out)
         }
 
         render()
